@@ -7,6 +7,7 @@ NOTEBOOKS=(
     "OutputData_Classes"
     
     "NumericalData_Classes"
+    "VectorizedOperations_Classes"
     "DataPlotting_Classes"
 )
 
