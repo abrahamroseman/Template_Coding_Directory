@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[46]:
 
 
 # # How to Import to Code Document
@@ -15,7 +15,7 @@
 # from DataPlotting_Classes import DataPlotting_Classes
 
 
-# In[45]:
+# In[134]:
 
 
 # DataPlotting_Classes
@@ -119,6 +119,51 @@ class DataPlotting_Classes:
             return [ticks,lim,levels]
 
         @staticmethod
+        def ComputeColorRange(data, method=None):
+            """
+            Compute (vmin, vmax) from `data`.
+            """
+            settings = UltimatePlotting_Class.colorRangeSettings
+            method = method if method is not None else settings['method']
+    
+            if method == 'percentile':
+                lo, hi = settings['percentileRange']
+                return (np.nanpercentile(data, lo), np.nanpercentile(data, hi))
+    
+            elif method == 'STD':
+                n = settings['nSTD']
+                mean, STD = np.nanmean(data), np.nanstd(data)
+                return (mean - n * STD, mean + n * STD)
+    
+            elif method == 'MAD':
+                n = settings['nMAD']
+                med = np.nanmedian(data)
+                MAD = np.nanmedian(np.abs(data - med))
+                return (med - n * MAD, med + n * MAD)
+    
+            elif method == 'minmax':
+                return (np.nanmin(data), np.nanmax(data))
+    
+            else:
+                raise ValueError(f"colorRangeSettings['method'] must be 'minmax', 'percentile', 'STD', or 'MAD', got {method!r}")
+        colorRangeSettings = {'method': 'minmax',
+                              'minmax': None,
+                              'percentileRange': (5, 95),
+                              'nSTD': 2.0,
+                              'nMAD': 3.0}
+    
+
+        @staticmethod
+        def SplitLevelsAroundZero(vmin, vmax, nLevels, nLevelsNeg, nLevelsPos):
+            """Build a level array split into a negative half (vmin->0) and
+            positive half (0->vmax), sharing zero as the boundary."""
+            nNeg = nLevelsNeg if nLevelsNeg is not None else nLevels // 2 + 1
+            nPos = nLevelsPos if nLevelsPos is not None else nLevels // 2 + 1
+            negLevels = np.linspace(vmin, 0, nNeg)
+            posLevels = np.linspace(0, vmax, nPos)
+            return np.unique(np.concatenate([negLevels, posLevels]))
+
+        @staticmethod
         def StretchColorbarAcrossAxes(cax, axesList, cbarSide="right"):
             """
             Stretch a single colorbar axis (cax) so it visually spans the
@@ -198,7 +243,6 @@ class DataPlotting_Classes:
     
             return [fig, ax]
 
-        @staticmethod
         def PlotContour(ax=None,cax=None,figSize=None, #figure and axis
                         xData=None,yData=None,zData=None, #data
                         plotType='contourf', #plotting function
@@ -206,7 +250,7 @@ class DataPlotting_Classes:
                         showCbar=True,cbarOrientation="vertical",cbarLabel=None, #colorbar setup
                         xTicks=None,yTicks=None,xLim=None,yLim=None, #data ticks and limits
                         nLevels=13,nLevelsNeg=None,nLevelsPos=None, #colorbar ticks and limits
-                        cbarTicks=None,colorLimits=None,useLocalColorRange=False, #colorbar ticks and limits
+                        colorRangeMethod='minmax', useLocalColorRange=False, cbarTicks=None,colorLimits=None, #colorbar ticks and limits, 
                         title=None,xLabel=None,yLabel=None, #labels
                         fontScale=1.0, **contourKwargs): #other arguments
             
@@ -222,9 +266,10 @@ class DataPlotting_Classes:
                 xMask = (xData >= xLim[0]) & (xData <= xLim[1])
                 yMask = (yData >= yLim[0]) & (yData <= yLim[1])
                 visibleData = zData[np.ix_(yMask, xMask)]
-                colorLimits = (np.nanmin(visibleData), np.nanmax(visibleData))
+                colorLimits = DataPlotting_Classes.UltimatePlotting_Class.ComputeColorRange(visibleData, method=colorRangeMethod)
             if colorLimits is None:
-                colorLimits = (np.nanmin(zData), np.nanmax(zData))
+                colorLimits = DataPlotting_Classes.UltimatePlotting_Class.ComputeColorRange(zData, method=colorRangeMethod)
+
             if symmetric:
                 vmin, vmax = colorLimits
                 vabs = max(abs(vmin), abs(vmax))
@@ -234,22 +279,25 @@ class DataPlotting_Classes:
                 if plotType == 'pcolormesh':
                     contourKwargs['vmin'] = vmin
                     contourKwargs['vmax'] = vmax
-                else:
-                    if (symmetric or centerZero) and vmin < 0 < vmax:
-                        # separate level counts per side; 0 is the shared boundary
-                        nNeg = nLevelsNeg if nLevelsNeg is not None else nLevels // 2 + 1
-                        nPos = nLevelsPos if nLevelsPos is not None else nLevels // 2 + 1
-                        negLevels = np.linspace(vmin, 0, nNeg)
-                        posLevels = np.linspace(0, vmax, nPos)
-                        contourKwargs['levels'] = np.unique(np.concatenate([negLevels, posLevels]))
-                    else:
-                        contourKwargs['levels'] = np.linspace(vmin, vmax, nLevels)
-                if (symmetric or centerZero) and vmin < 0 < vmax:
+                elif (symmetric or centerZero) and vmin < 0 < vmax:
+                    nTotal = nLevels
+                    contourKwargs['levels'] = DataPlotting_Classes.UltimatePlotting_Class.SplitLevelsAroundZero(vmin, vmax, nTotal, nLevelsNeg, nLevelsPos)
                     contourKwargs['norm'] = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+                else:
+                    contourKwargs['levels'] = np.linspace(vmin, vmax, nLevels)
+
             elif plotType == 'pcolormesh' and 'levels' in contourKwargs:
                 lv = contourKwargs.pop('levels')
                 contourKwargs.setdefault('vmin', lv[0])
                 contourKwargs.setdefault('vmax', lv[-1])
+
+            elif (symmetric or centerZero) and 'levels' in contourKwargs and 'norm' not in contourKwargs:
+                lv = np.asarray(contourKwargs['levels'])
+                vmin, vmax = lv[0], lv[-1]
+                if vmin < 0 < vmax:
+                    nTotal = len(lv)
+                    contourKwargs['levels'] = DataPlotting_Classes.UltimatePlotting_Class.SplitLevelsAroundZero(vmin, vmax, nTotal, nLevelsNeg, nLevelsPos)
+                    contourKwargs['norm'] = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
                 
             #plotting
             if plotType == 'contourf':
@@ -596,6 +644,26 @@ class DataPlotting_Classes:
 
             return fig
 
+        def Test3():
+            x = np.linspace(0, 100, 50)
+            y = np.linspace(0, 50, 30)
+            X, Y = np.meshgrid(x, y)
+            
+            Z = (
+                -1 * np.exp(-((X - 25) ** 2) / 300 - ((Y - 25) ** 2) / 200)
+                + 8 * np.exp(-((X - 75) ** 2) / 300 - ((Y - 25) ** 2) / 200)
+            )
+            
+            # --- Test 1: auto levels (existing behavior, unaffected by the new branch) ---
+            fig, ax, cbar = DataPlotting_Classes.UltimatePlotting_Class.PlotContour(
+                xData=x, yData=y, zData=Z,
+                title="Auto levels, centerZero=True",
+                xLabel="X", yLabel="Y",
+                cmap="RdBu_r",
+                levels=np.linspace(-1, 8, 13),
+                centerZero=True,
+                nLevelsNeg=4+1,
+                nLevelsPos=4+1)
 
     # ============================================================
     # Functions
