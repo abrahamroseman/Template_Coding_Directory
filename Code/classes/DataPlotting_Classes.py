@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[100]:
+# In[1]:
 
 
 # # How to Import to Code Document
@@ -15,7 +15,7 @@
 # from DataPlotting_Classes import DataPlotting_Classes
 
 
-# In[101]:
+# In[45]:
 
 
 # DataPlotting_Classes
@@ -33,15 +33,11 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from matplotlib.ticker import ScalarFormatter
 from matplotlib.ticker import MaxNLocator
-# import matplotlib.colors as colors
-# import matplotlib.ticker as ticker
-# import matplotlib.cm as cm
-# from matplotlib.colors import Normalize
-# import matplotlib.ticker as mticker
+from matplotlib.colors import TwoSlopeNorm
 
 #Class
 class DataPlotting_Classes:
-    
+
     # UltimatePlotting_Class
     # ============================================================
     class UltimatePlotting_Class:
@@ -203,28 +199,67 @@ class DataPlotting_Classes:
             return [fig, ax]
 
         @staticmethod
-        def PlotContour(ax=None, cax=None, figSize=None,
-                         xData=None, yData=None, zData=None,
-                         showCbar=True,
-                         cbarOrientation="vertical", cbarLabel=None,
-                         title=None, xLabel=None, yLabel=None,
-                         xTicks=None, yTicks=None, xLim=None, yLim=None,
-                         cbarTicks=None,
-                         fontScale=1.0,
-                         **contourKwargs):
-            """
-            ...
-            showCbar : if False, skip creating a colorbar entirely (cax is
-                ignored and left untouched/empty). Returned cbar is None.
-            ...
-            """
+        def PlotContour(ax=None,cax=None,figSize=None, #figure and axis
+                        xData=None,yData=None,zData=None, #data
+                        plotType='contourf', #plotting function
+                        symmetric=False, centerZero=False, #colorbar symmetry
+                        showCbar=True,cbarOrientation="vertical",cbarLabel=None, #colorbar setup
+                        xTicks=None,yTicks=None,xLim=None,yLim=None, #data ticks and limits
+                        nLevels=13,nLevelsNeg=None,nLevelsPos=None, #colorbar ticks and limits
+                        cbarTicks=None,colorLimits=None,useLocalColorRange=False, #colorbar ticks and limits
+                        title=None,xLabel=None,yLabel=None, #labels
+                        fontScale=1.0, **contourKwargs): #other arguments
+            
+            if plotType not in ('contourf', 'contour', 'pcolormesh'):
+                raise ValueError(f"plotType must be 'contourf', 'contour', or 'pcolormesh', got {plotType!r}")
             if ax is None:
                 fig, ax = plt.subplots(figsize=figSize)
             else:
                 fig = ax.figure
-    
-            cf = ax.contourf(xData, yData, zData, **contourKwargs)
-    
+                
+            #code for using local color range
+            if colorLimits is None and useLocalColorRange and xLim is not None and yLim is not None:
+                xMask = (xData >= xLim[0]) & (xData <= xLim[1])
+                yMask = (yData >= yLim[0]) & (yData <= yLim[1])
+                visibleData = zData[np.ix_(yMask, xMask)]
+                colorLimits = (np.nanmin(visibleData), np.nanmax(visibleData))
+            if colorLimits is None:
+                colorLimits = (np.nanmin(zData), np.nanmax(zData))
+            if symmetric:
+                vmin, vmax = colorLimits
+                vabs = max(abs(vmin), abs(vmax))
+                colorLimits = (-vabs, vabs)
+            if not ({'levels', 'vmin', 'vmax', 'norm'} & contourKwargs.keys()):
+                vmin, vmax = colorLimits
+                if plotType == 'pcolormesh':
+                    contourKwargs['vmin'] = vmin
+                    contourKwargs['vmax'] = vmax
+                else:
+                    if (symmetric or centerZero) and vmin < 0 < vmax:
+                        # separate level counts per side; 0 is the shared boundary
+                        nNeg = nLevelsNeg if nLevelsNeg is not None else nLevels // 2 + 1
+                        nPos = nLevelsPos if nLevelsPos is not None else nLevels // 2 + 1
+                        negLevels = np.linspace(vmin, 0, nNeg)
+                        posLevels = np.linspace(0, vmax, nPos)
+                        contourKwargs['levels'] = np.unique(np.concatenate([negLevels, posLevels]))
+                    else:
+                        contourKwargs['levels'] = np.linspace(vmin, vmax, nLevels)
+                if (symmetric or centerZero) and vmin < 0 < vmax:
+                    contourKwargs['norm'] = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+            elif plotType == 'pcolormesh' and 'levels' in contourKwargs:
+                lv = contourKwargs.pop('levels')
+                contourKwargs.setdefault('vmin', lv[0])
+                contourKwargs.setdefault('vmax', lv[-1])
+                
+            #plotting
+            if plotType == 'contourf':
+                cf = ax.contourf(xData, yData, zData, **contourKwargs)
+            elif plotType == 'contour':
+                cf = ax.contour(xData, yData, zData, **contourKwargs)
+            else:  # pcolormesh
+                cf = ax.pcolormesh(xData, yData, zData, **contourKwargs)
+                
+            #labels, ticks, and limits
             if title is not None:
                 ax.set_title(title)
             if xLabel is not None:
@@ -239,7 +274,8 @@ class DataPlotting_Classes:
                 ax.set_xlim(xLim)
             if yLim is not None:
                 ax.set_ylim(yLim)
-    
+                
+            #colorbar setup
             cbar = None
             if showCbar:
                 cbar = fig.colorbar(cf, cax=cax, ax=ax if cax is None else None, orientation=cbarOrientation)
@@ -247,14 +283,18 @@ class DataPlotting_Classes:
                     cbar.set_label(cbarLabel)
                 if cbarTicks is not None:
                     cbar.set_ticks(cbarTicks)
+                elif 'levels' in contourKwargs:
+                    # default ticks to the exact level boundaries, so the first/last
+                    # ticks are flush with the colorbar ends (the auto locator can
+                    # skip the endpoints when a TwoSlopeNorm is in use)
+                    cbar.set_ticks(contourKwargs['levels'])
             elif cax is not None:
-                cax.set_visible(False)   # hide the reserved cbar axis from MakeAlignedGridFigure so it doesn't sit there blank
-    
+                cax.set_visible(False)
+            #fonts
             [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale)
             DataPlotting_Classes.UltimatePlotting_Class.ApplyFontStyles(ax, fontStyles)
             if cbar is not None:
                 DataPlotting_Classes.UltimatePlotting_Class.ApplyColorbarFontStyles(cbar, fontStyles)
-    
             return [fig, ax, cbar]
     
         ##################################################################################################################################

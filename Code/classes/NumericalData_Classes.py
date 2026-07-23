@@ -344,21 +344,6 @@ class NumericalData_Classes:
             return out, out_dims
     
         @staticmethod
-        def NanDivide(numerator, denominator):
-            """
-            Elementwise division that returns NaN wherever the denominator is 0,
-            instead of raising a ZeroDivisionError / RuntimeWarning or returning
-            inf.
-            """
-            numerator = np.asarray(numerator, dtype=float)
-            denominator = np.asarray(denominator, dtype=float)
-    
-            with np.errstate(divide='ignore', invalid='ignore'):
-                result = np.where(denominator != 0, numerator / denominator, np.nan)
-    
-            return result
-            
-        @staticmethod
         def Test():
             arr4d = np.random.rand(3, 4, 5, 6)  # (t, z, y, x)
             out, dims = NumericalData_Classes.AreaStatistics_Class.Ultimate_AreaStatistic(
