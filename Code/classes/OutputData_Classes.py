@@ -58,37 +58,40 @@ class OutputData_Classes:
                        outputDictionary,
                        scriptName, dataName, outputSubDirectory, fileName,
                        subDataName=None,
-                       dtype=None, makeSubDirectory=True):
+                       dtype=None, makeSubDirectory=True,
+                       fileType="h5"):
             """
             Save outputDictionary to:
-                self.outputDirectory / outputSubDirectory / <actualFileName>.h5
-        
+                self.outputDirectory / outputSubDirectory / <actualFileName>.<ext>
             If subDataName is given, the actual saved fileName becomes
-            f"{fileName}_{subDataName}". The log stores outputSubDirectory and the
-            BASE fileName once under dataName, and appends subDataName to a
-            "subFileNames" list (since these are shared across all sub-entries).
+            f"{fileName}_{subDataName}". The log stores outputSubDirectory, the
+            BASE fileName, and fileType once under dataName, and appends
+            subDataName to a "subFileNames" list (since these are shared across
+            all sub-entries).
             """
+            saveFunction, _, extension = OutputData_Classes.Functions.GetSaveLoadFunctions(fileType)
+        
             actualFileName = fileName if subDataName is None else f"{fileName}_{subDataName}"
         
             out_dir = os.path.join(self.outputDirectory, outputSubDirectory)
-            out_file = os.path.join(out_dir, f"{actualFileName}.h5")
+            out_file = os.path.join(out_dir, f"{actualFileName}{extension}")
         
-            OutputData_Classes.Functions.SaveOutput_H5(
+            saveFunction(
                 outputDictionary=outputDictionary,
                 filepath=out_file,
                 dtype=dtype,
                 makeDirs=makeSubDirectory,
             )
         
-            # Pass the BASE fileName (not actualFileName) to the log
-            self.update_log(scriptName, dataName, outputSubDirectory, fileName, subDataName)
-        
+            # Pass the BASE fileName (not actualFileName) and fileType to the log
+            self.update_log(scriptName, dataName, outputSubDirectory, fileName, subDataName,
+                             fileType=fileType)
         
         def LoadOutput(self, scriptName, dataName, subDataName=None, verbose=True):
             """
             Load data by looking up (scriptName, dataName) in the output log to get
-            outputSubDirectory and the base fileName. If subDataName is given, it's
-            appended to the base fileName to form the actual file on disk.
+            outputSubDirectory, the base fileName, and fileType. If subDataName is
+            given, it's appended to the base fileName to form the actual file on disk.
             """
             log = self.load_log()
         
@@ -102,6 +105,7 @@ class OutputData_Classes:
             entry = log[scriptName][dataName]
             outputSubDirectory = entry["outputSubDirectory"]
             baseFileName = entry["fileName"]
+            fileType = entry["fileType"]
         
             if subDataName is not None:
                 availableSubNames = entry.get("subFileNames", [])
@@ -112,15 +116,15 @@ class OutputData_Classes:
             else:
                 fileName = baseFileName
         
-            in_dir = os.path.join(self.outputDirectory, outputSubDirectory)
-            in_file = os.path.join(in_dir, f"{fileName}.h5")
+            _, loadFunction, extension = OutputData_Classes.Functions.GetSaveLoadFunctions(fileType)
         
-            outputDictionary = OutputData_Classes.Functions.LoadOutput_H5(
-                filepath=in_file, verbose=verbose
-            )
+            in_dir = os.path.join(self.outputDirectory, outputSubDirectory)
+            in_file = os.path.join(in_dir, f"{fileName}{extension}")
+        
+            outputDictionary = loadFunction(filepath=in_file, verbose=verbose)
         
             return outputDictionary
-            
+                    
         def Load_Or_RunAndSave(self,
                        function,
                        scriptName, dataName, outputSubDirectory, fileName,
@@ -128,6 +132,7 @@ class OutputData_Classes:
                        dtype=None, makeSubDirectory=True,
                        args=None, kwargs=None,
                        forceRecalculate=False,
+                       fileType="h5",
                        verbose=True):
             """
             Delegates to Functions.Load_Or_RunAndSave, but injects self.LoadOutput
@@ -136,6 +141,9 @@ class OutputData_Classes:
             actual load/save still goes through the log-aware DatabaseManager
             methods -- so update_log happens automatically inside SaveOutput,
             with no separate log-update step needed here.
+        
+            fileType : "h5" (default) or "pickle" -- forwarded to both the
+                       file-existence check and the actual save/load calls.
             """
             actualFileName = fileName if subDataName is None else f"{fileName}_{subDataName}"
             fileDirectory = os.path.join(self.outputDirectory, outputSubDirectory)
@@ -157,13 +165,14 @@ class OutputData_Classes:
                     outputSubDirectory=outputSubDirectory, fileName=fileName,
                     subDataName=subDataName,
                     dtype=dtype, makeSubDirectory=makeSubDirectory,
+                    fileType=fileType,
                 )
         
             return OutputData_Classes.Functions.Load_Or_RunAndSave(
                 calculateFunction=function,
                 fileDirectory=fileDirectory,
                 fileName=actualFileName,
-                fileType="h5",
+                fileType=fileType,
                 args=args, kwargs=kwargs,
                 loadFunction=loadFunction, saveFunction=saveFunction,
                 dtype=dtype,
@@ -188,10 +197,11 @@ class OutputData_Classes:
                     return json.load(f)
             return {}
         
-        def update_log(self, scriptName, dataName, outputSubDirectory, fileName, subDataName=None):
+        def update_log(self, scriptName, dataName, outputSubDirectory, fileName,
+                       subDataName=None, fileType="h5"):
             """
-            Record outputSubDirectory + base fileName once under dataName, and
-            append subDataName (if given) to a shared "subFileNames" list.
+            Record outputSubDirectory + base fileName + fileType once under dataName,
+            and append subDataName (if given) to a shared "subFileNames" list.
             """
             log = self.load_log()
             if scriptName not in log:
@@ -201,12 +211,14 @@ class OutputData_Classes:
                 log[scriptName][dataName] = {
                     "outputSubDirectory": outputSubDirectory,
                     "fileName": fileName,
+                    "fileType": fileType,
                     "subFileNames": []
                 }
             else:
-                # keep outputSubDirectory/fileName current in case they've changed
+                # keep outputSubDirectory/fileName/fileType current in case they've changed
                 log[scriptName][dataName]["outputSubDirectory"] = outputSubDirectory
                 log[scriptName][dataName]["fileName"] = fileName
+                log[scriptName][dataName]["fileType"] = fileType
                 log[scriptName][dataName].setdefault("subFileNames", [])
         
             if subDataName is not None and subDataName not in log[scriptName][dataName]["subFileNames"]:
@@ -215,7 +227,7 @@ class OutputData_Classes:
             os.makedirs(os.path.dirname(self.outputLogFile), exist_ok=True)
             with open(self.outputLogFile, 'w') as f:
                 json.dump(log, f, indent=2)
-        
+                
         
         def ShowLog(self):
             """Print everything recorded in the output log."""
@@ -396,11 +408,28 @@ class OutputData_Classes:
                 print(f"Loaded output file: {filepath}\n")
         
             return outputDictionary
+
+        @staticmethod
+        def GetSaveLoadFunctions(fileType):
+            """
+            Given a fileType ("h5" or "pickle"), return the matching
+            (saveFunction, loadFunction, extension) trio.
+            """
+            if fileType == "h5":
+                return (OutputData_Classes.Functions.SaveOutput_H5,
+                        OutputData_Classes.Functions.LoadOutput_H5,
+                        ".h5")
+            elif fileType == "pickle":
+                return (OutputData_Classes.Functions.SaveOutput_Pickle,
+                        OutputData_Classes.Functions.LoadOutput_Pickle,
+                        ".pkl")
+            else:
+                raise ValueError(f"Unknown fileType '{fileType}'.")
         
         @staticmethod
         def Load_Or_RunAndSave(calculateFunction, fileDirectory=".", fileName="filename", fileType="h5",
                                args=None, kwargs=None, 
-                               loadFunction=None,saveFunction=None,
+                               loadFunction=None, saveFunction=None,
                                dtype=None, 
                                calculatedData=None, forceRecalculate=False, 
                                verbose=True):
@@ -408,26 +437,13 @@ class OutputData_Classes:
             Loads data from fileDirectory/fileName.<ext> if it exists.
             Otherwise, runs the provided function and saves the output.
             """
-            if fileType == "pickle":
-                extension = ".pkl"
-            elif fileType == "h5":
-                extension = ".h5"
+            defaultSaveFunction, defaultLoadFunction, extension = \
+                OutputData_Classes.Functions.GetSaveLoadFunctions(fileType)
         
-            #some examples for saveFunction and loadFunction
             if loadFunction is None:
-                if fileType == "pickle":
-                    loadFunction = OutputData_Classes.Functions.LoadOutput_Pickle
-                elif fileType == "h5":
-                    loadFunction = OutputData_Classes.Functions.LoadOutput_H5
-                else:
-                    raise ValueError(f"Unknown fileType '{fileType}'. Must be 'pickle' or 'h5'.")
+                loadFunction = defaultLoadFunction
             if saveFunction is None:
-                if fileType == "pickle":
-                    saveFunction = OutputData_Classes.Functions.SaveOutput_Pickle
-                elif fileType == "h5":
-                    saveFunction = OutputData_Classes.Functions.SaveOutput_H5
-                else:
-                    raise ValueError(f"Unknown fileType '{fileType}'. Must be 'pickle' or 'h5'.")
+                saveFunction = defaultSaveFunction
         
             filepath = os.path.join(fileDirectory, f"{fileName}{extension}")
         
