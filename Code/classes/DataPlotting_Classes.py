@@ -123,7 +123,7 @@ class DataPlotting_Classes:
             """
             Compute (vmin, vmax) from `data`.
             """
-            settings = UltimatePlotting_Class.colorRangeSettings
+            settings = DataPlotting_Classes.UltimatePlotting_Class.colorRangeSettings
             method = method if method is not None else settings['method']
     
             if method == 'percentile':
@@ -771,25 +771,31 @@ class DataPlotting_Classes:
     class FigureSavingFunctions:
 
         @staticmethod
-        def GetFigurePath(scriptName, fileName, figureSubDirectory="",
+        def GetFigurePath(folderName, scriptName, fileName,
+                          *,
+                          subFolderName=None, subFileName=None,
                           outputDirectory="../../Output",
                           extension="jpg",
                           makeDirs=True):
-    
-            directory = os.path.join(
-                outputDirectory,
-                "Figures",
-                scriptName,
-                figureSubDirectory
-            )
-    
+            """
+            Returns the full filepath for a figure:
+                outputDirectory / Figures / folderName [/ subFolderName] / scriptName / <fileName>[_subFileName].<extension>
+            """
+            actualFileName = fileName if subFileName is None else f"{fileName}_{subFileName}"
+        
+            pathParts = [outputDirectory, "Figures", folderName]
+            if subFolderName is not None:
+                pathParts.append(subFolderName)
+            pathParts.append(scriptName)
+            directory = os.path.join(*pathParts)
+        
             if makeDirs:
                 os.makedirs(directory, exist_ok=True)
-    
-            if not fileName.lower().endswith(f".{extension.lower()}"):
-                fileName = f"{fileName}.{extension}"
-    
-            return os.path.join(directory, fileName)
+        
+            if not actualFileName.lower().endswith(f".{extension.lower()}"):
+                actualFileName = f"{actualFileName}.{extension}"
+        
+            return [os.path.join(directory, actualFileName)]
         
         class PDFSaver_Class:
             def __init__(self, fileName,
