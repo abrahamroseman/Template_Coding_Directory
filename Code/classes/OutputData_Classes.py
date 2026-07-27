@@ -40,11 +40,11 @@ class OutputData_Classes:
                      verbose=True):
     
             self.classDirectory = classDirectory
-            self.inputDirectory = self.resolve_path(inputDirectory)
-            self.outputDirectory = self.resolve_path(outputDirectory)
+            [self.inputDirectory] = self.resolve_path(inputDirectory)
+            [self.outputDirectory] = self.resolve_path(outputDirectory)
             self.verbose = verbose
     
-            # Log file that records scriptName/fileName -> outputSubDirectory
+            # Log file that records scriptName/fileName -> subDataName
             self.outputLogFile = os.path.join(self.outputDirectory, "output_log.json")
     
             if self.verbose:
@@ -56,119 +56,135 @@ class OutputData_Classes:
                 
         def SaveOutput(self,
                        outputDictionary,
-                       scriptName, dataName, outputSubDirectory, fileName,
-                       subDataName=None,
-                       dtype=None, makeSubDirectory=True,
+                       folderName, scriptName, dataName,
+                       *,
+                       subFolderName=None, subDataName=None,
+                       fileName=None, subFileName=None,
+                       dtype=None, makeDirectory=True,
                        fileType="h5"):
             """
             Save outputDictionary to:
-                self.outputDirectory / outputSubDirectory / <actualFileName>.<ext>
-            If subDataName is given, the actual saved fileName becomes
-            f"{fileName}_{subDataName}". The log stores outputSubDirectory, the
-            BASE fileName, and fileType once under dataName, and appends
-            subDataName to a "subFileNames" list (since these are shared across
-            all sub-entries).
+                self.outputDirectory / folderName [/ subFolderName] / scriptName / dataName [/ subDataName] / <fileName>[_subFileName].<ext>
             """
-            saveFunction, _, extension = OutputData_Classes.Functions.GetSaveLoadFunctions(fileType)
+            if fileName is None:
+                fileName = dataName
         
-            actualFileName = fileName if subDataName is None else f"{fileName}_{subDataName}"
+            [saveFunction, _, extension] = OutputData_Classes.Functions.GetSaveLoadFunctions(fileType)
         
-            out_dir = os.path.join(self.outputDirectory, outputSubDirectory)
+            actualFileName = fileName if subFileName is None else f"{fileName}_{subFileName}"
+        
+            pathParts = [self.outputDirectory, folderName]
+            if subFolderName is not None:
+                pathParts.append(subFolderName)
+            pathParts += [scriptName, dataName]
+            if subDataName is not None:
+                pathParts.append(subDataName)
+            out_dir = os.path.join(*pathParts)
             out_file = os.path.join(out_dir, f"{actualFileName}{extension}")
         
             saveFunction(
                 outputDictionary=outputDictionary,
                 filepath=out_file,
                 dtype=dtype,
-                makeDirs=makeSubDirectory,
+                makeDirs=makeDirectory,
+                attrs={
+                    "folderName": folderName,
+                    "subFolderName": subFolderName,
+                    "scriptName": scriptName,
+                    "dataName": dataName,
+                    "subDataName": subDataName,
+                    "fileName": fileName,
+                    "subFileName": subFileName,
+                },
             )
         
-            # Pass the BASE fileName (not actualFileName) and fileType to the log
-            self.update_log(scriptName, dataName, outputSubDirectory, fileName, subDataName,
-                             fileType=fileType)
-        
-        def LoadOutput(self, scriptName, dataName, subDataName=None, verbose=True):
-            """
-            Load data by looking up (scriptName, dataName) in the output log to get
-            outputSubDirectory, the base fileName, and fileType. If subDataName is
-            given, it's appended to the base fileName to form the actual file on disk.
-            """
+            self.update_log(folderName, scriptName, dataName, subFolderName, subDataName,
+                             fileName, subFileName, fileType=fileType)
+                
+        def LoadOutput(self, folderName, scriptName, dataName,
+                       subFileName=None, verbose=True):
             log = self.load_log()
         
-            if scriptName not in log:
-                raise KeyError(f"No entries logged for scriptName '{scriptName}'. "
+            if folderName not in log:
+                raise KeyError(f"No entries logged for folderName '{folderName}'. "
                                 f"Available: {list(log.keys())}")
-            if dataName not in log[scriptName]:
-                raise KeyError(f"No entry logged for dataName '{dataName}' under scriptName '{scriptName}'. "
-                                f"Available: {list(log[scriptName].keys())}")
+            if scriptName not in log[folderName]:
+                raise KeyError(f"No entries logged for scriptName '{scriptName}' under folderName '{folderName}'. "
+                                f"Available: {list(log[folderName].keys())}")
+            if dataName not in log[folderName][scriptName]:
+                raise KeyError(f"No entry logged for dataName '{dataName}' under "
+                                f"'{folderName}/{scriptName}'. Available: {list(log[folderName][scriptName].keys())}")
         
-            entry = log[scriptName][dataName]
-            outputSubDirectory = entry["outputSubDirectory"]
+            entry = log[folderName][scriptName][dataName]
+            subFolderName = entry.get("subFolderName")
+            subDataName = entry.get("subDataName")
             baseFileName = entry["fileName"]
             fileType = entry["fileType"]
         
-            if subDataName is not None:
+            if subFileName is not None:
                 availableSubNames = entry.get("subFileNames", [])
-                if subDataName not in availableSubNames:
-                    raise KeyError(f"No subDataName '{subDataName}' logged under "
-                                    f"'{scriptName}/{dataName}'. Available: {availableSubNames}")
-                fileName = f"{baseFileName}_{subDataName}"
+                if subFileName not in availableSubNames:
+                    raise KeyError(f"No subFileName '{subFileName}' logged under "
+                                    f"'{folderName}/{scriptName}/{dataName}'. Available: {availableSubNames}")
+                fileName = f"{baseFileName}_{subFileName}"
             else:
                 fileName = baseFileName
         
-            _, loadFunction, extension = OutputData_Classes.Functions.GetSaveLoadFunctions(fileType)
+            [_, loadFunction, extension] = OutputData_Classes.Functions.GetSaveLoadFunctions(fileType)
         
-            in_dir = os.path.join(self.outputDirectory, outputSubDirectory)
+            pathParts = [self.outputDirectory, folderName]
+            if subFolderName is not None:
+                pathParts.append(subFolderName)
+            pathParts += [scriptName, dataName]
+            if subDataName is not None:
+                pathParts.append(subDataName)
+            in_dir = os.path.join(*pathParts)
             in_file = os.path.join(in_dir, f"{fileName}{extension}")
         
-            outputDictionary = loadFunction(filepath=in_file, verbose=verbose)
+            [outputDictionary] = loadFunction(filepath=in_file, verbose=verbose)
         
-            return outputDictionary
-                    
+            return [outputDictionary]
+                            
         def Load_Or_RunAndSave(self,
-                       function,
-                       scriptName, dataName, outputSubDirectory, fileName,
-                       subDataName=None,
-                       dtype=None, makeSubDirectory=True,
-                       args=None, kwargs=None,
-                       forceRecalculate=False,
-                       fileType="h5",
-                       verbose=True):
-            """
-            Delegates to Functions.Load_Or_RunAndSave, but injects self.LoadOutput
-            and self.SaveOutput as the loadFunction/saveFunction. This keeps the
-            fast file-existence check in Functions.Load_Or_RunAndSave, while the
-            actual load/save still goes through the log-aware DatabaseManager
-            methods -- so update_log happens automatically inside SaveOutput,
-            with no separate log-update step needed here.
+                               function,
+                               folderName, scriptName, dataName,
+                               *,
+                               subFolderName=None, subDataName=None,
+                               fileName=None, subFileName=None,
+                               dtype=None, makeDirectory=True,
+                               args=None, kwargs=None,
+                               forceRecalculate=False,
+                               fileType="h5",
+                               verbose=True):
+            if fileName is None:
+                fileName = dataName
         
-            fileType : "h5" (default) or "pickle" -- forwarded to both the
-                       file-existence check and the actual save/load calls.
-            """
-            actualFileName = fileName if subDataName is None else f"{fileName}_{subDataName}"
-            fileDirectory = os.path.join(self.outputDirectory, outputSubDirectory)
+            actualFileName = fileName if subFileName is None else f"{fileName}_{subFileName}"
+        
+            pathParts = [self.outputDirectory, folderName]
+            if subFolderName is not None:
+                pathParts.append(subFolderName)
+            pathParts += [scriptName, dataName]
+            if subDataName is not None:
+                pathParts.append(subDataName)
+            fileDirectory = os.path.join(*pathParts)
         
             def loadFunction(filepath, verbose=True):
-                # filepath is ignored -- self.LoadOutput resolves the path itself
-                # via the log, using the closed-over scriptName/dataName/subDataName.
                 return self.LoadOutput(
-                    scriptName=scriptName, dataName=dataName,
-                    subDataName=subDataName, verbose=verbose
-                )
+                    folderName=folderName, scriptName=scriptName, dataName=dataName,
+                    subFileName=subFileName, verbose=verbose)
         
             def saveFunction(data, filepath, dtype=None):
-                # filepath is ignored -- self.SaveOutput builds the path itself and
-                # ALSO updates the log as a side effect.
                 self.SaveOutput(
                     outputDictionary=data,
-                    scriptName=scriptName, dataName=dataName,
-                    outputSubDirectory=outputSubDirectory, fileName=fileName,
-                    subDataName=subDataName,
-                    dtype=dtype, makeSubDirectory=makeSubDirectory,
+                    folderName=folderName, scriptName=scriptName, dataName=dataName,
+                    subFolderName=subFolderName, subDataName=subDataName,
+                    fileName=fileName, subFileName=subFileName,
+                    dtype=dtype, makeDirectory=makeDirectory,
                     fileType=fileType,
                 )
         
-            return OutputData_Classes.Functions.Load_Or_RunAndSave(
+            [result] = OutputData_Classes.Functions.Load_Or_RunAndSave(
                 calculateFunction=function,
                 fileDirectory=fileDirectory,
                 fileName=actualFileName,
@@ -177,9 +193,10 @@ class OutputData_Classes:
                 loadFunction=loadFunction, saveFunction=saveFunction,
                 dtype=dtype,
                 forceRecalculate=forceRecalculate,
-                verbose=verbose,
-            )
-    
+                verbose=verbose)
+        
+            return result
+            
         # ============================================================
         # ========== Helper Functions ==========
         # ============================================================
@@ -187,8 +204,8 @@ class OutputData_Classes:
         def resolve_path(self, path):
             """Join a relative path onto classDirectory; leave absolute paths as-is."""
             if os.path.isabs(path):
-                return path
-            return os.path.normpath(os.path.join(self.classDirectory, path))
+                return [path]
+            return [os.path.normpath(os.path.join(self.classDirectory, path))]
     
         def load_log(self):
             """Read the output log from disk (empty dict if it doesn't exist yet)."""
@@ -196,53 +213,117 @@ class OutputData_Classes:
                 with open(self.outputLogFile, 'r') as f:
                     return json.load(f)
             return {}
-        
-        def update_log(self, scriptName, dataName, outputSubDirectory, fileName,
-                       subDataName=None, fileType="h5"):
-            """
-            Record outputSubDirectory + base fileName + fileType once under dataName,
-            and append subDataName (if given) to a shared "subFileNames" list.
-            """
+                
+        def update_log(self, folderName, scriptName, dataName, subFolderName, subDataName,
+                       fileName, subFileName=None, fileType="h5"):
             log = self.load_log()
-            if scriptName not in log:
-                log[scriptName] = {}
+            log.setdefault(folderName, {})
+            log[folderName].setdefault(scriptName, {})
         
-            if dataName not in log[scriptName]:
-                log[scriptName][dataName] = {
-                    "outputSubDirectory": outputSubDirectory,
+            if dataName not in log[folderName][scriptName]:
+                log[folderName][scriptName][dataName] = {
+                    "subFolderName": subFolderName,
+                    "subDataName": subDataName,
                     "fileName": fileName,
                     "fileType": fileType,
                     "subFileNames": []
                 }
             else:
-                # keep outputSubDirectory/fileName/fileType current in case they've changed
-                log[scriptName][dataName]["outputSubDirectory"] = outputSubDirectory
-                log[scriptName][dataName]["fileName"] = fileName
-                log[scriptName][dataName]["fileType"] = fileType
-                log[scriptName][dataName].setdefault("subFileNames", [])
+                log[folderName][scriptName][dataName]["subFolderName"] = subFolderName
+                log[folderName][scriptName][dataName]["subDataName"] = subDataName
+                log[folderName][scriptName][dataName]["fileName"] = fileName
+                log[folderName][scriptName][dataName]["fileType"] = fileType
+                log[folderName][scriptName][dataName].setdefault("subFileNames", [])
         
-            if subDataName is not None and subDataName not in log[scriptName][dataName]["subFileNames"]:
-                log[scriptName][dataName]["subFileNames"].append(subDataName)
+            if subFileName is not None and subFileName not in log[folderName][scriptName][dataName]["subFileNames"]:
+                log[folderName][scriptName][dataName]["subFileNames"].append(subFileName)
         
             os.makedirs(os.path.dirname(self.outputLogFile), exist_ok=True)
             with open(self.outputLogFile, 'w') as f:
                 json.dump(log, f, indent=2)
-                
-        
+                        
         def ShowLog(self):
-            """Print everything recorded in the output log."""
             log = self.load_log()
             print("=== Output Log ===")
-            for scriptName, dataEntries in log.items():
-                print(f" {scriptName}:")
-                for dataName, entry in dataEntries.items():
-                    subNames = entry.get("subFileNames", [])
-                    if subNames:
-                        print(f"   {dataName} -> {entry['outputSubDirectory']}/{entry['fileName']}_[subDataName].h5")
-                        print(f"      subFileNames: {subNames}")
-                    else:
-                        print(f"   {dataName} -> {entry['outputSubDirectory']}/{entry['fileName']}.h5")
+            for folderName, scriptEntries in log.items():
+                print(f"{folderName}:")
+                for scriptName, dataEntries in scriptEntries.items():
+                    print(f" {scriptName}:")
+                    for dataName, entry in dataEntries.items():
+                        subFolderPart = f"{entry.get('subFolderName')}/" if entry.get("subFolderName") else ""
+                        subNames = entry.get("subFileNames", [])
+                        if subNames:
+                            print(f"   {dataName} -> {subFolderPart}{entry['subDataName']}/{entry['fileName']}_[subFileName].h5")
+                            print(f"      subFileNames: {subNames}")
+                        else:
+                            print(f"   {dataName} -> {subFolderPart}{entry['subDataName']}/{entry['fileName']}.h5")
             print("==================", "\n")
+
+        def RebuildLog(self, verbose=True):
+            rebuiltLog = {}
+            extensionToAttrReader = {
+                ".h5": OutputData_Classes.Functions.GetAttrs_H5,
+                ".pkl": OutputData_Classes.Functions.GetAttrs_Pickle,
+            }
+            extensionToType = {".h5": "h5", ".pkl": "pickle"}
+        
+            if not os.path.isdir(self.outputDirectory):
+                if verbose:
+                    print(f"No outputDirectory found at {self.outputDirectory}, nothing to rebuild.\n")
+                return [rebuiltLog]
+        
+            for root, _, files in os.walk(self.outputDirectory):
+                for f in files:
+                    ext = os.path.splitext(f)[1]
+                    if ext not in extensionToAttrReader:
+                        continue
+        
+                    filepath = os.path.join(root, f)
+                    try:
+                        [attrs] = extensionToAttrReader[ext](filepath)
+                    except Exception as e:
+                        if verbose:
+                            print(f"Warning: couldn't read attrs from {filepath} ({e}) -- skipping.\n")
+                        continue
+        
+                    requiredKeys = ("folderName", "scriptName", "dataName", "fileName")
+                    if not all(k in attrs and attrs[k] for k in requiredKeys):
+                        if verbose:
+                            print(f"Warning: {filepath} missing folderName/scriptName/dataName/fileName attrs "
+                                  f"(saved before folderName was added?) -- skipping.\n")
+                        continue
+                            
+                    folderName = attrs["folderName"]
+                    subFolderName = attrs.get("subFolderName")
+                    scriptName = attrs["scriptName"]
+                    dataName = attrs["dataName"]
+                    subDataName = attrs.get("subDataName")
+                    fileName = attrs["fileName"]
+                    subFileName = attrs.get("subFileName")
+                            
+                    rebuiltLog.setdefault(folderName, {})
+                    rebuiltLog[folderName].setdefault(scriptName, {})
+                    if dataName not in rebuiltLog[folderName][scriptName]:
+                        rebuiltLog[folderName][scriptName][dataName] = {
+                            "subFolderName": subFolderName,
+                            "subDataName": subDataName,
+                            "fileName": fileName,
+                            "fileType": extensionToType[ext],
+                            "subFileNames": [],
+                        }
+        
+                    entry = rebuiltLog[folderName][scriptName][dataName]
+                    if subFileName is not None and subFileName not in entry["subFileNames"]:
+                        entry["subFileNames"].append(subFileName)
+        
+            os.makedirs(os.path.dirname(self.outputLogFile), exist_ok=True)
+            with open(self.outputLogFile, 'w') as f:
+                json.dump(rebuiltLog, f, indent=2)
+        
+            if verbose:
+                print(f"Rebuilt log written to: {self.outputLogFile}\n")
+        
+            return [rebuiltLog]
     
         # ============================================================
         # ========== Test Functions ==========
@@ -260,7 +341,7 @@ class OutputData_Classes:
         def Test(self,t=1):
             """
             Self-test: save a small outputDictionary (a=[0,1,2,3], b=[1,2,3,4])
-            with SaveOutput under subDataName="time1" (which logs it nested under
+            with SaveOutput under subFileName="time1" (which logs it nested under
             dataName), then read it back with LoadOutput and check the round-trip.
             """
             print("=== Running DataManager Test ===\n")
@@ -270,72 +351,44 @@ class OutputData_Classes:
                 "b": [1, 2, 3, 4],
             }
         
-            # Save (this also writes the log entry, nested under dataName/subDataName)
+            # Save (this also writes the log entry, nested under dataName/subFileName)
             self.SaveOutput(
                 outputDictionary=outputDictionary,
-                scriptName="Algorithm_1", dataName="testData", subDataName=f"time_{t}",
-                outputSubDirectory="data/test_directory",
-                fileName="test_data_name",
+                folderName="1_Folder_One", subFolderName= "Demo", scriptName="DemoScript", 
+                dataName="Testing_Data_Output_And_Loading",subDataName="testSubDataName",
+                fileName="testFileName",subFileName=f"time_{t}",
                 dtype="int16",
             )
-        
+                        
             # Check input/output data
             print("Variables to save:")
             for var_name, arr in outputDictionary.items():
                 print(f"  {var_name}: {list(arr)}")
         
-            # Load back using scriptName + dataName + subDataName (via the log)
-            loadedDictionary = self.LoadOutput(
-                scriptName="Algorithm_1", dataName="testData", subDataName=f"time_{t}"
-            )
+            # Load back using scriptName + dataName + subFileName (via the log)
+            [loadedDictionary] = self.LoadOutput(
+                folderName="1_Folder_One", scriptName="DemoScript", dataName="Testing_Data_Output_And_Loading",
+                subFileName=f"time_{t}")
         
             # Check input/output data
             print("Loaded variables:")
             for var_name, arr in loadedDictionary.items():
                 print(f"  {var_name}: {list(arr)}")
-    
-        def Test2(self):
-            """
-            Self-test: use Load_Or_RunAndSave (with a no-parameter) function that
-            returns a small outputDictionary (a=[0,1,2,3], b=[1,2,3,4]), saved under
-            subDataName="time1" (logged nested under dataName), then read back.
-            """
-            print("=== Running DataManager Test2 ===\n")
-        
-            def function():
-                return {
-                    "a": [0, 1, 2, 3],
-                    "b": [1, 2, 3, 4],
-                }
-        
-            # Runs function() if not cached, saves + logs it, and returns the result
-            outputDictionary = self.Load_Or_RunAndSave(
-                function=function, args=None, kwargs=None,
-                scriptName="Algorithm_1", dataName="testData", subDataName="time1",
-                outputSubDirectory="data/test_directory",
-                fileName="test_data_name",
-                dtype="int16",
-            )
-        
-            # Check input/output data
-            print("Loaded or Saved variables:")
-            for var_name, arr in outputDictionary.items():
-                print(f"  {var_name}: {list(arr)}")
 
     # Functions
     # ============================================================
     class Functions:
-        
+            
         @staticmethod
-        def SaveOutput_H5(outputDictionary, filepath, dtype=None, makeDirs=True):
+        def SaveOutput_H5(outputDictionary, filepath, dtype=None, makeDirs=True, attrs=None):
             """
             Generic HDF5 saving function. Saves outputDictionary (a dict of
             {var_name: array}) to filepath. If outputDictionary is not a dict,
             it is wrapped as {"data": outputDictionary} first.
         
-            dtype : None -> let h5py infer dtype for each variable
-                    single dtype -> broadcast to all variables
-                    list of dtypes -> must match len(outputDictionary), one per variable
+            attrs : optional dict of metadata written as top-level HDF5 attributes
+                    (e.g. {"scriptName": ..., "dataName": ..., "fileName": ..., "subFileName": ...}).
+                    Lets RebuildLog recover exact values later without parsing filenames.
             """
             if not isinstance(outputDictionary, dict):
                 outputDictionary = {"data": outputDictionary}
@@ -358,30 +411,61 @@ class OutputData_Classes:
                 for (var_name, arr), dt in zip(outputDictionary.items(), dtype_list):
                     f.create_dataset(var_name, data=arr, dtype=dt, compression="gzip")
         
+                if attrs:
+                    for key, value in attrs.items():
+                        # h5py attrs can't store None -- use empty string as the "absent" marker
+                        f.attrs[key] = value if value is not None else ""
+        
             print(f"Saved output file: {filepath}\n")
-        
+            
         @staticmethod
-        def LoadOutput_H5(filepath, dtype=None, verbose=True):
+        def LoadOutput_H5(filepath, dtype=None, verbose=True,
+                          loadToMemory=True):
             """
-            Generic HDF5 loading function. Returns a dict of {var_name: array}
-            read from filepath.
+            Generic HDF5 loading function. 
+            If loadToMemory==True:
+            Returns a dict of {varName: array} read from filepath.
+            Else:
+                Returns the dataFile object itself (*user must remember to close*)
             """
-            outputDictionary = {}
+            if not loadToMemory:
+                dataFile = h5py.File(filepath, 'r')
+                
+                if verbose:
+                    print(f"Loaded data as file object: {filepath}\n")
+                return [dataFile]
+                
+            else:
+                outputDictionary = {}
+                with h5py.File(filepath, 'r') as dataFile:
+                    for varName in dataFile.keys():
+                        outputDictionary[varName] = dataFile[varName][:]
+                        
+                if verbose:
+                    print(f"Loaded data into dictionary: {filepath}\n")
+                return [outputDictionary]
+
+        @staticmethod
+        def GetAttrs_H5(filepath):
+            """
+            Reads only the top-level attributes from an HDF5 file, without loading
+            any datasets. Cheap even for large files -- used by RebuildLog to recover
+            scriptName/dataName/fileName/subFileName without guessing from filenames.
+            """
             with h5py.File(filepath, 'r') as f:
-                for var_name in f.keys():
-                    outputDictionary[var_name] = f[var_name][:]
+                attrDictionary = dict(f.attrs)
         
-            if verbose:
-                print(f"Loaded output file: {filepath}\n")
+            # Convert the "" placeholder back to None for subFileName/subDataName
+            for key in ("subFileName", "subDataName"):
+                if key in attrDictionary and attrDictionary[key] == "":
+                    attrDictionary[key] = None
         
-            return outputDictionary
-        
+            return [attrDictionary]
+                
         @staticmethod
-        def SaveOutput_Pickle(outputDictionary, filepath, dtype=None, makeDirs=True):
+        def SaveOutput_Pickle(outputDictionary, filepath, dtype=None, makeDirs=True, attrs=None):
             """
-            Generic pickle saving function. Saves outputDictionary (a dict of
-            {var_name: value}) to filepath. If outputDictionary is not a dict,
-            it is wrapped as {"data": outputDictionary} first.
+            attrs, if given, is stored under a reserved "_attrs" key alongside the data.
             """
             if not isinstance(outputDictionary, dict):
                 outputDictionary = {"data": outputDictionary}
@@ -391,23 +475,32 @@ class OutputData_Classes:
                 if dirName:
                     os.makedirs(dirName, exist_ok=True)
         
+            dataToSave = dict(outputDictionary)
+            if attrs:
+                dataToSave["_attrs"] = attrs
+        
             with open(filepath, 'wb') as file:
-                pickle.dump(outputDictionary, file)
+                pickle.dump(dataToSave, file)
         
             print(f"Saved output file: {filepath}\n")
-        
+                
         @staticmethod
         def LoadOutput_Pickle(filepath, verbose=True):
-            """
-            Generic pickle loading function. Returns the dict stored at filepath.
-            """
             with open(filepath, 'rb') as file:
                 outputDictionary = pickle.load(file)
+        
+            outputDictionary.pop("_attrs", None)   # keep normal loads clean
         
             if verbose:
                 print(f"Loaded output file: {filepath}\n")
         
-            return outputDictionary
+            return [outputDictionary]
+
+        @staticmethod
+        def GetAttrs_Pickle(filepath):
+            with open(filepath, 'rb') as file:
+                outputDictionary = pickle.load(file)
+            return [outputDictionary.get("_attrs", {})]
 
         @staticmethod
         def GetSaveLoadFunctions(fileType):
@@ -416,13 +509,13 @@ class OutputData_Classes:
             (saveFunction, loadFunction, extension) trio.
             """
             if fileType == "h5":
-                return (OutputData_Classes.Functions.SaveOutput_H5,
+                return [OutputData_Classes.Functions.SaveOutput_H5,
                         OutputData_Classes.Functions.LoadOutput_H5,
-                        ".h5")
+                        ".h5"]
             elif fileType == "pickle":
-                return (OutputData_Classes.Functions.SaveOutput_Pickle,
+                return [OutputData_Classes.Functions.SaveOutput_Pickle,
                         OutputData_Classes.Functions.LoadOutput_Pickle,
-                        ".pkl")
+                        ".pkl"]
             else:
                 raise ValueError(f"Unknown fileType '{fileType}'.")
         
@@ -437,7 +530,7 @@ class OutputData_Classes:
             Loads data from fileDirectory/fileName.<ext> if it exists.
             Otherwise, runs the provided function and saves the output.
             """
-            defaultSaveFunction, defaultLoadFunction, extension = \
+            [defaultSaveFunction, defaultLoadFunction, extension] = \
                 OutputData_Classes.Functions.GetSaveLoadFunctions(fileType)
         
             if loadFunction is None:
@@ -447,20 +540,15 @@ class OutputData_Classes:
         
             filepath = os.path.join(fileDirectory, f"{fileName}{extension}")
         
-            # Check if the file already exists
             if os.path.exists(filepath) and not forceRecalculate:
-                data = loadFunction(filepath, verbose=verbose)
-                return data
+                [data] = loadFunction(filepath, verbose=verbose)   # <- unpack here
             else:
                 if verbose:
                     print(f"Data from {filepath} not found. Running calculation...")
-                # Run the target function
                 data = calculateFunction(*(args or ()), **(kwargs or {})) if calculatedData is None else calculatedData
-        
-                # Save the result for future use
                 saveFunction(data, filepath, dtype=dtype)
         
-                return data
+            return [data]
 
     # OtherFunctions
     # ============================================================
@@ -572,14 +660,14 @@ class OutputData_Classes:
                     end_job = self.total_elements
             elif self.UsingJobArray == False:
                 start_job, end_job = 0, self.total_elements
-            return start_job, end_job
+            return [start_job, end_job]
     
         # ------------------------------------------------------------
         def Test(self):
             """Print start/end for all jobs to verify chunking logic."""
             start, end = [], []
             for job_id in range(1, self.num_jobs + 1):
-                s, e = self._get_job_range(job_id)
+                [s, e] = self._get_job_range(job_id)
                 print(f"Job {job_id}: {s} → {e}")
                 start.append(s)
                 end.append(e)
