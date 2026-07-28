@@ -323,7 +323,7 @@ class DataPlotting_Classes:
                 
             #colorbar setup
             cbar = None
-            if showCbar:
+            if showCbar and cax is not None:
                 cbar = fig.colorbar(cf, cax=cax, ax=ax if cax is None else None, orientation=cbarOrientation)
                 if cbarLabel is not None:
                     cbar.set_label(cbarLabel)
