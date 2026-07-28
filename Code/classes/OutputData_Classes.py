@@ -1,15 +1,13 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 
 # # How to Import to Code Document
 ########################################
 # import os, sys
-# mainCodeDirectory = os.path.abspath("../..")
-# path = os.path.join(mainCodeDirectory, "classes")
-# sys.path.append(path)
+# sys.path.append(os.path.join(os.path.abspath("../.."), "classes"))
 
 # # Importing
 # from OutputData_Classes import OutputData_Classes
@@ -23,9 +21,9 @@
 
 #Libraries
 import os
-import json
-import h5py; import pickle
 import numpy as np
+import h5py; import pickle
+import json
 
 #Class
 class OutputData_Classes:
@@ -42,13 +40,24 @@ class OutputData_Classes:
             self.classDirectory = classDirectory
             [self.inputDirectory] = self.resolve_path(inputDirectory)
             [self.outputDirectory] = self.resolve_path(outputDirectory)
-            self.verbose = verbose
     
             # Log file that records scriptName/fileName -> subDataName
             self.outputLogFile = os.path.join(self.outputDirectory, "output_log.json")
     
-            if self.verbose:
+            if verbose:
                 self.Summary()
+
+        # ============================================================
+        # ========== Summary Function ==========
+        # ============================================================    
+        
+        def Summary(self):
+            """Print a summary of the directory configuration."""
+            print("=== DataManager Summary ===")
+            print(f" inputDirectory  #: {self.inputDirectory}")
+            print(f" outputDirectory #: {self.outputDirectory}")
+            print(f" outputLogFile         #: {self.outputLogFile}")
+            print("=========================", "\n")
     
         # ============================================================
         # ========== Functions ==========
@@ -64,7 +73,9 @@ class OutputData_Classes:
                        fileType="h5"):
             """
             Save outputDictionary to:
-                self.outputDirectory / folderName [/ subFolderName] / scriptName / dataName [/ subDataName] / <fileName>[_subFileName].<ext>
+                self.outputDirectory / folderName [/ subFolderName] / 
+                scriptName / 
+                dataName [/ subDataName] / <fileName>[_subFileName].<ext>
             """
             if fileName is None:
                 fileName = dataName
@@ -73,18 +84,18 @@ class OutputData_Classes:
         
             actualFileName = fileName if subFileName is None else f"{fileName}_{subFileName}"
         
-            pathParts = [self.outputDirectory, folderName]
+            pathParts = [self.outputDirectory, "Data", folderName]
             if subFolderName is not None:
                 pathParts.append(subFolderName)
             pathParts += [scriptName, dataName]
             if subDataName is not None:
                 pathParts.append(subDataName)
-            out_dir = os.path.join(*pathParts)
-            out_file = os.path.join(out_dir, f"{actualFileName}{extension}")
-        
+            fileDirectory = os.path.join(*pathParts)
+            filePath = os.path.join(fileDirectory, f"{actualFileName}{extension}")
+
             saveFunction(
                 outputDictionary=outputDictionary,
-                filepath=out_file,
+                filePath=filePath,
                 dtype=dtype,
                 makeDirs=makeDirectory,
                 attrs={
@@ -132,19 +143,19 @@ class OutputData_Classes:
         
             [_, loadFunction, extension] = OutputData_Classes.Functions.GetSaveLoadFunctions(fileType)
         
-            pathParts = [self.outputDirectory, folderName]
+            pathParts = [self.outputDirectory, "Data", folderName]
             if subFolderName is not None:
                 pathParts.append(subFolderName)
             pathParts += [scriptName, dataName]
             if subDataName is not None:
                 pathParts.append(subDataName)
-            in_dir = os.path.join(*pathParts)
-            in_file = os.path.join(in_dir, f"{fileName}{extension}")
+            fileDirectory = os.path.join(*pathParts)
+            filePath = os.path.join(fileDirectory, f"{fileName}{extension}")
         
-            [outputDictionary] = loadFunction(filepath=in_file, verbose=verbose)
+            [outputDictionary] = loadFunction(filePath=filePath, verbose=verbose)
         
             return [outputDictionary]
-                            
+            
         def Load_Or_RunAndSave(self,
                                function,
                                folderName, scriptName, dataName,
@@ -161,7 +172,7 @@ class OutputData_Classes:
         
             actualFileName = fileName if subFileName is None else f"{fileName}_{subFileName}"
         
-            pathParts = [self.outputDirectory, folderName]
+            pathParts = [self.outputDirectory,"Data", folderName]
             if subFolderName is not None:
                 pathParts.append(subFolderName)
             pathParts += [scriptName, dataName]
@@ -242,7 +253,7 @@ class OutputData_Classes:
             with open(self.outputLogFile, 'w') as f:
                 json.dump(log, f, indent=2)
                         
-        def ShowLog(self):
+        def show_log(self):
             log = self.load_log()
             print("=== Output Log ===")
             for folderName, scriptEntries in log.items():
@@ -259,7 +270,7 @@ class OutputData_Classes:
                             print(f"   {dataName} -> {subFolderPart}{entry['subDataName']}/{entry['fileName']}.h5")
             print("==================", "\n")
 
-        def RebuildLog(self, verbose=True):
+        def rebuild_log(self, verbose=True):
             rebuiltLog = {}
             extensionToAttrReader = {
                 ".h5": OutputData_Classes.Functions.GetAttrs_H5,
@@ -328,15 +339,6 @@ class OutputData_Classes:
         # ============================================================
         # ========== Test Functions ==========
         # ============================================================
-    
-        def Summary(self):
-            """Print a summary of the directory configuration."""
-            print("=== DataManager Summary ===")
-            print(f" inputDirectory  #: {self.inputDirectory}")
-            print(f" outputDirectory #: {self.outputDirectory}")
-            print(f" outputLogFile         #: {self.outputLogFile}")
-            print("=========================", "\n")
-        
         
         def Test(self,t=1):
             """
@@ -362,8 +364,8 @@ class OutputData_Classes:
                         
             # Check input/output data
             print("Variables to save:")
-            for var_name, arr in outputDictionary.items():
-                print(f"  {var_name}: {list(arr)}")
+            for varName, arr in outputDictionary.items():
+                print(f"  {varName}: {list(arr)}")
         
             # Load back using scriptName + dataName + subFileName (via the log)
             [loadedDictionary] = self.LoadOutput(
@@ -372,29 +374,29 @@ class OutputData_Classes:
         
             # Check input/output data
             print("Loaded variables:")
-            for var_name, arr in loadedDictionary.items():
-                print(f"  {var_name}: {list(arr)}")
+            for varName, arr in loadedDictionary.items():
+                print(f"  {varName}: {list(arr)}")
 
     # Functions
     # ============================================================
     class Functions:
             
         @staticmethod
-        def SaveOutput_H5(outputDictionary, filepath, dtype=None, makeDirs=True, attrs=None):
+        def SaveOutput_H5(outputDictionary, filePath, dtype=None, makeDirs=True, attrs=None):
             """
             Generic HDF5 saving function. Saves outputDictionary (a dict of
-            {var_name: array}) to filepath. If outputDictionary is not a dict,
+            {varName: array}) to filePath. If outputDictionary is not a dict,
             it is wrapped as {"data": outputDictionary} first.
         
             attrs : optional dict of metadata written as top-level HDF5 attributes
                     (e.g. {"scriptName": ..., "dataName": ..., "fileName": ..., "subFileName": ...}).
-                    Lets RebuildLog recover exact values later without parsing filenames.
+                    Lets rebuild_log recover exact values later without parsing filenames.
             """
             if not isinstance(outputDictionary, dict):
                 outputDictionary = {"data": outputDictionary}
         
             if makeDirs:
-                dirName = os.path.dirname(filepath)
+                dirName = os.path.dirname(filePath)
                 if dirName:
                     os.makedirs(dirName, exist_ok=True)
         
@@ -407,52 +409,52 @@ class OutputData_Classes:
             else:
                 dtype_list = [dtype] * len(outputDictionary)
         
-            with h5py.File(filepath, 'w') as f:
-                for (var_name, arr), dt in zip(outputDictionary.items(), dtype_list):
-                    f.create_dataset(var_name, data=arr, dtype=dt, compression="gzip")
+            with h5py.File(filePath, 'w') as f:
+                for (varName, arr), dt in zip(outputDictionary.items(), dtype_list):
+                    f.create_dataset(varName, data=arr, dtype=dt, compression="gzip")
         
                 if attrs:
                     for key, value in attrs.items():
                         # h5py attrs can't store None -- use empty string as the "absent" marker
                         f.attrs[key] = value if value is not None else ""
         
-            print(f"Saved output file: {filepath}\n")
+            print(f"Saved output file: {filePath}\n")
             
         @staticmethod
-        def LoadOutput_H5(filepath, dtype=None, verbose=True,
+        def LoadOutput_H5(filePath, dtype=None, verbose=True,
                           loadToMemory=True):
             """
             Generic HDF5 loading function. 
             If loadToMemory==True:
-            Returns a dict of {varName: array} read from filepath.
+            Returns a dict of {varName: array} read from filePath.
             Else:
                 Returns the dataFile object itself (*user must remember to close*)
             """
             if not loadToMemory:
-                dataFile = h5py.File(filepath, 'r')
+                dataFile = h5py.File(filePath, 'r')
                 
                 if verbose:
-                    print(f"Loaded data as file object: {filepath}\n")
+                    print(f"Loaded data as file object: {filePath}\n")
                 return [dataFile]
                 
             else:
                 outputDictionary = {}
-                with h5py.File(filepath, 'r') as dataFile:
+                with h5py.File(filePath, 'r') as dataFile:
                     for varName in dataFile.keys():
                         outputDictionary[varName] = dataFile[varName][:]
                         
                 if verbose:
-                    print(f"Loaded data into dictionary: {filepath}\n")
+                    print(f"Loaded data into dictionary: {filePath}\n")
                 return [outputDictionary]
 
         @staticmethod
-        def GetAttrs_H5(filepath):
+        def GetAttrs_H5(filePath):
             """
             Reads only the top-level attributes from an HDF5 file, without loading
-            any datasets. Cheap even for large files -- used by RebuildLog to recover
+            any datasets. Cheap even for large files -- used by rebuild_log to recover
             scriptName/dataName/fileName/subFileName without guessing from filenames.
             """
-            with h5py.File(filepath, 'r') as f:
+            with h5py.File(filePath, 'r') as f:
                 attrDictionary = dict(f.attrs)
         
             # Convert the "" placeholder back to None for subFileName/subDataName
@@ -463,7 +465,7 @@ class OutputData_Classes:
             return [attrDictionary]
                 
         @staticmethod
-        def SaveOutput_Pickle(outputDictionary, filepath, dtype=None, makeDirs=True, attrs=None):
+        def SaveOutput_Pickle(outputDictionary, filePath, dtype=None, makeDirs=True, attrs=None):
             """
             attrs, if given, is stored under a reserved "_attrs" key alongside the data.
             """
@@ -471,7 +473,7 @@ class OutputData_Classes:
                 outputDictionary = {"data": outputDictionary}
         
             if makeDirs:
-                dirName = os.path.dirname(filepath)
+                dirName = os.path.dirname(filePath)
                 if dirName:
                     os.makedirs(dirName, exist_ok=True)
         
@@ -479,26 +481,26 @@ class OutputData_Classes:
             if attrs:
                 dataToSave["_attrs"] = attrs
         
-            with open(filepath, 'wb') as file:
+            with open(filePath, 'wb') as file:
                 pickle.dump(dataToSave, file)
         
-            print(f"Saved output file: {filepath}\n")
+            print(f"Saved output file: {filePath}\n")
                 
         @staticmethod
-        def LoadOutput_Pickle(filepath, verbose=True):
-            with open(filepath, 'rb') as file:
+        def LoadOutput_Pickle(filePath, verbose=True):
+            with open(filePath, 'rb') as file:
                 outputDictionary = pickle.load(file)
         
             outputDictionary.pop("_attrs", None)   # keep normal loads clean
         
             if verbose:
-                print(f"Loaded output file: {filepath}\n")
+                print(f"Loaded output file: {filePath}\n")
         
             return [outputDictionary]
 
         @staticmethod
-        def GetAttrs_Pickle(filepath):
-            with open(filepath, 'rb') as file:
+        def GetAttrs_Pickle(filePath):
+            with open(filePath, 'rb') as file:
                 outputDictionary = pickle.load(file)
             return [outputDictionary.get("_attrs", {})]
 
@@ -545,7 +547,9 @@ class OutputData_Classes:
             else:
                 if verbose:
                     print(f"Data from {filepath} not found. Running calculation...")
-                data = calculateFunction(*(args or ()), **(kwargs or {})) if calculatedData is None else calculatedData
+                data = calculateFunction(*(args or ()), **(kwargs or {}))\
+                if calculatedData is None else calculatedData
+                
                 saveFunction(data, filepath, dtype=dtype)
         
             return [data]
@@ -622,13 +626,13 @@ class OutputData_Classes:
         For splitting any data dimension 
         into a set number of jobs to run with "job array" in HPC systems (i.e. slurm, PBS, etc)
         """
-        def __init__(self, total_elements, 
-                     num_jobs, UsingJobArray,
+        def __init__(self, totalElements, 
+                     numJobs, usingJobArray,
                      custom_job_id=None,
                      verbose=True):
-            self.total_elements = total_elements
-            self.num_jobs = num_jobs
-            self.UsingJobArray = UsingJobArray
+            self.totalElements = totalElements
+            self.numJobs = numJobs
+            self.usingJobArray = usingJobArray
             
             # Get job ID (default = 1 if not running under Slurm)
             if custom_job_id is None:
@@ -639,42 +643,60 @@ class OutputData_Classes:
                 self.job_id = custom_job_id
             
             # Precompute range info
-            self.job_range = total_elements // num_jobs
-            self.remaining = total_elements % num_jobs
+            self.job_range = totalElements // numJobs
+            self.remaining = totalElements % numJobs
             
             # Compute job range for this job
-            self.start_job, self.end_job = self._get_job_range(self.job_id)
+            self.start_job, self.end_job = self.GetJobRange(self.job_id)
     
             # Print summary
             if verbose:
                 self.Summary()
+
+        # ============================================================
+        # ========== Summary Function ==========
+        # ============================================================    
+
     
-        # ------------------------------------------------------------
-        def _get_job_range(self, job_id):
-            if self.UsingJobArray == True:
+        def Summary(self):
+            print(f"Running timesteps from {self.start_job}:{self.end_job-1}","\n")
+
+        # ============================================================
+        # ========== Functions ==========
+        # ============================================================    
+
+        def GetJobRange(self, job_id):
+            if self.usingJobArray == True:
                 """Compute start and end indices for this job."""
                 job_id -= 1
                 start_job = job_id * self.job_range + min(job_id, self.remaining)
                 end_job = start_job + self.job_range + (1 if job_id < self.remaining else 0)
-                if job_id == self.num_jobs - 1:
-                    end_job = self.total_elements
-            elif self.UsingJobArray == False:
-                start_job, end_job = 0, self.total_elements
+                if job_id == self.numJobs - 1:
+                    end_job = self.totalElements
+            elif self.usingJobArray == False:
+                [start_job, end_job] = [0, self.totalElements]
             return [start_job, end_job]
+
+        def GetLoopElements(start_job,end_job,
+                            allowedElements=None):
+            loop_elements = np.arange(self.total_elements)[start_job:end_job]
+            if allowedElements is not None:
+                loop_elements = loop_elements[np.isin(loop_elements, allowedElements)]
+            return loop_elements
     
-        # ------------------------------------------------------------
+        # ============================================================
+        # ========== Test Functions ==========
+        # ============================================================   
+        
         def Test(self):
             """Print start/end for all jobs to verify chunking logic."""
             start, end = [], []
-            for job_id in range(1, self.num_jobs + 1):
-                [s, e] = self._get_job_range(job_id)
+            for job_id in range(1, self.numJobs + 1):
+                [s, e] = self.GetJobRange(job_id)
                 print(f"Job {job_id}: {s} → {e}")
                 start.append(s)
                 end.append(e)
             print("Unique starts:", len(np.unique(start)) == len(start))
             print("Unique ends:", len(np.unique(end)) == len(end))
             print("No zero-length ranges:", np.all(np.array(start) != np.array(end)))
-    
-        def Summary(self):
-            print(f"Running timesteps from {self.start_job}:{self.end_job-1}","\n")
 

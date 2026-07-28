@@ -7,9 +7,7 @@
 # # How to Import to Code Document
 ########################################
 # import os, sys
-# mainCodeDirectory = os.path.abspath("../..")
-# path = os.path.join(mainCodeDirectory, "classes")
-# sys.path.append(path)
+# sys.path.append(os.path.join(os.path.abspath("../.."), "classes"))
 
 # # Importing
 # from NumericalData_Classes import NumericalData_Classes
@@ -47,38 +45,40 @@ class NumericalData_Classes:
             """
             array = np.asarray(array)
             result = np.zeros_like(array, dtype=float)
-            slice_at_axis = lambda s: tuple(
-                s if dim == axis else slice(None) for dim in range(array.ndim)
+            coordArray = np.asarray(coord)
+            isNonUniform = coordArray.ndim > 0 and coordArray.size > 1
+            sliceAtAxis = lambda s: tuple(
+                s if dim == axis else slice(None) for dim in range(array.ndim) 
             )
-            coord_array = np.asarray(coord)
-            is_nonuniform = coord_array.ndim > 0 and coord_array.size > 1
-    
-            if is_nonuniform:
-                if coord_array.shape[0] != array.shape[axis]:
+
+            if isNonUniform:
+                if coordArray.shape[0] != array.shape[axis]:
                     raise ValueError(
                         f"coord must have length {array.shape[axis]} (matching array "
                         f"along axis {axis} -- one coordinate per data point), "
-                        f"got length {coord_array.shape[0]}"
+                        f"got length {coordArray.shape[0]}"
                     )
-                c = coord_array.reshape([-1 if d == axis else 1 for d in range(array.ndim)])
-                result[slice_at_axis(slice(1, -1))] = (
-                    array[slice_at_axis(slice(2, None))] - array[slice_at_axis(slice(0, -2))]
-                ) / (c[slice_at_axis(slice(2, None))] - c[slice_at_axis(slice(0, -2))])
-                result[slice_at_axis(0)] = (
-                    (array[slice_at_axis(1)] - array[slice_at_axis(0)])
-                    / (c[slice_at_axis(1)] - c[slice_at_axis(0)])
-                )
-                result[slice_at_axis(-1)] = (
-                    (array[slice_at_axis(-1)] - array[slice_at_axis(-2)])
-                    / (c[slice_at_axis(-1)] - c[slice_at_axis(-2)])
+                c = coordArray.reshape([-1 if d == axis else 1 for d in range(array.ndim)])
+                result[sliceAtAxis(slice(1, -1))] = (
+                    array[sliceAtAxis(slice(2, None))] - array[sliceAtAxis(slice(0, -2))]
+                ) / (c[sliceAtAxis(slice(2, None))] - c[sliceAtAxis(slice(0, -2))])
+                
+                result[sliceAtAxis(0)] = (
+                    (array[sliceAtAxis(1)] - array[sliceAtAxis(0)])
+                    / (c[sliceAtAxis(1)] - c[sliceAtAxis(0)])
+                ) 
+                
+                result[sliceAtAxis(-1)] = (
+                    (array[sliceAtAxis(-1)] - array[sliceAtAxis(-2)])
+                    / (c[sliceAtAxis(-1)] - c[sliceAtAxis(-2)])
                 )
             else:
                 d = float(coord)
-                result[slice_at_axis(slice(1, -1))] = (
-                    array[slice_at_axis(slice(2, None))] - array[slice_at_axis(slice(0, -2))]
+                result[sliceAtAxis(slice(1, -1))] = (
+                    array[sliceAtAxis(slice(2, None))] - array[sliceAtAxis(slice(0, -2))]
                 ) / (2 * d)
-                result[slice_at_axis(0)] = (array[slice_at_axis(1)] - array[slice_at_axis(0)]) / d
-                result[slice_at_axis(-1)] = (array[slice_at_axis(-1)] - array[slice_at_axis(-2)]) / d
+                result[sliceAtAxis(0)] = (array[sliceAtAxis(1)] - array[sliceAtAxis(0)]) / d
+                result[sliceAtAxis(-1)] = (array[sliceAtAxis(-1)] - array[sliceAtAxis(-2)]) / d
     
             return result
     
@@ -97,71 +97,74 @@ class NumericalData_Classes:
             """
             array = np.asarray(array)
             result = np.zeros_like(array, dtype=float)
-            slice_at_axis = lambda s: tuple(
+            sliceAtAxis = lambda s: tuple(
                 s if dim == axis else slice(None) for dim in range(array.ndim)
             )
-            coord_array = np.asarray(coord)
-            is_nonuniform = coord_array.ndim > 0 and coord_array.size > 1
+            coordArray = np.asarray(coord)
+            isNonUniform = coordArray.ndim > 0 and coordArray.size > 1
     
-            if is_nonuniform:
-                if coord_array.shape[0] != array.shape[axis]:
+            if isNonUniform:
+                if coordArray.shape[0] != array.shape[axis]:
                     raise ValueError(
                         f"coord must have length {array.shape[axis]} (matching array "
-                        f"along axis {axis}), got length {coord_array.shape[0]}"
+                        f"along axis {axis}), got length {coordArray.shape[0]}"
                     )
-                c = coord_array.reshape([-1 if d == axis else 1 for d in range(array.ndim)])
-                h1 = c[slice_at_axis(slice(1, -1))] - c[slice_at_axis(slice(0, -2))]
-                h2 = c[slice_at_axis(slice(2, None))] - c[slice_at_axis(slice(1, -1))]
-                f_im1 = array[slice_at_axis(slice(0, -2))]
-                f_i = array[slice_at_axis(slice(1, -1))]
-                f_ip1 = array[slice_at_axis(slice(2, None))]
-                result[slice_at_axis(slice(1, -1))] = 2 * (
+                c = coordArray.reshape([-1 if d == axis else 1 for d in range(array.ndim)])
+                h1 = c[sliceAtAxis(slice(1, -1))] - c[sliceAtAxis(slice(0, -2))]
+                h2 = c[sliceAtAxis(slice(2, None))] - c[sliceAtAxis(slice(1, -1))]
+                f_im1 = array[sliceAtAxis(slice(0, -2))]
+                f_i = array[sliceAtAxis(slice(1, -1))]
+                f_ip1 = array[sliceAtAxis(slice(2, None))]
+                result[sliceAtAxis(slice(1, -1))] = 2 * (
                     f_im1 / (h1 * (h1 + h2))
                     - f_i / (h1 * h2)
                     + f_ip1 / (h2 * (h1 + h2))
                 )
             else:
                 d = float(coord)
-                result[slice_at_axis(slice(1, -1))] = (
-                    array[slice_at_axis(slice(0, -2))]
-                    - 2 * array[slice_at_axis(slice(1, -1))]
-                    + array[slice_at_axis(slice(2, None))]
+                result[sliceAtAxis(slice(1, -1))] = (
+                    array[sliceAtAxis(slice(0, -2))]
+                    - 2 * array[sliceAtAxis(slice(1, -1))]
+                    + array[sliceAtAxis(slice(2, None))]
                 ) / d ** 2
     
             return result
     
         @staticmethod
-        def Divergence(f_u, f_v, f_w=None, axis_u=-1, axis_v=-2, axis_w=-3,
-                        coord_u=1, coord_v=1, coord_w=1):
+        def Divergence(u, v, w=None, uAxis=-1, vAxis=-2, wAxis=-3,
+                        uCoord=1, vCoord=1, wCoord=1):
             """
             Horizontal or 3D divergence, built from Derivative().
             """
-            div = (
-                NumericalData_Classes.Differentiation_Class.Derivative(f_u, axis=axis_u, coord=coord_u)
-                + NumericalData_Classes.Differentiation_Class.Derivative(f_v, axis=axis_v, coord=coord_v)
+            divergence = (
+                NumericalData_Classes.Differentiation_Class.Derivative(u, axis=uAxis, coord=uCoord)
+                + NumericalData_Classes.Differentiation_Class.Derivative(v, axis=vAxis, coord=vCoord)
             )
-            if f_w is not None:
-                div = div + NumericalData_Classes.Differentiation_Class.Derivative(f_w, axis=axis_w, coord=coord_w)
-            return div
+            
+            if w is not None:
+                divergence = divergence\
+                + NumericalData_Classes.Differentiation_Class.Derivative(w,
+                                                                         axis=wAxis,coord=wCoord)
+            return divergence
     
         @staticmethod
-        def Laplacian(f, axis_x=-1, axis_y=-2, axis_z=None,
-                      coord_x=1, coord_y=1, coord_z=1):
+        def Laplacian(array, xAxis=-1, yAxis=-2, zAxis=None,
+                      xCoord=1, yCoord=1, zCoord=1):
             """
             Horizontal or 3D Laplacian, built from SecondDerivative().
         
             f : the scalar field to differentiate.
-            axis_z / coord_z : leave axis_z=None for horizontal-only Laplacian
-                               (d2f/dx2 + d2f/dy2). Provide axis_z for the full
+            zAxis / zCoord : leave zAxis=None for horizontal-only Laplacian
+                               (d2f/dx2 + d2f/dy2). Provide zAxis for the full
                                3D Laplacian (+ d2f/dz2).
             """
-            lap = (
-                NumericalData_Classes.Differentiation_Class.SecondDerivative(f, axis=axis_x, coord=coord_x)
-                + NumericalData_Classes.Differentiation_Class.SecondDerivative(f, axis=axis_y, coord=coord_y)
+            laplacian = (
+                NumericalData_Classes.Differentiation_Class.SecondDerivative(array, axis=xAxis, coord=xCoord)
+                + NumericalData_Classes.Differentiation_Class.SecondDerivative(array, axis=yAxis, coord=yCoord)
             )
-            if axis_z is not None:
-                lap = lap + NumericalData_Classes.Differentiation_Class.SecondDerivative(f, axis=axis_z, coord=coord_z)
-            return lap
+            if zAxis is not None:
+                laplacian = laplacian + NumericalData_Classes.Differentiation_Class.SecondDerivative(array, axis=zAxis, coord=zCoord)
+            return laplacian
     
         @staticmethod
         def Test():
@@ -190,7 +193,7 @@ class NumericalData_Classes:
             dfv_dy_numeric = NumericalData_Classes.Differentiation_Class.Derivative(f_v, axis=0, coord=y)
             dfv_dy_exact = -np.sin(Y)
     
-            div_numeric = NumericalData_Classes.Differentiation_Class.Divergence(f_u, f_v, axis_u=1, axis_v=0,
+            div_numeric = NumericalData_Classes.Differentiation_Class.Divergence(f_u, f_v, uAxis=1, vAxis=0,
                                                            coord_u=x, coord_v=y)
             div_exact = np.cos(X) - np.sin(Y)
     
@@ -237,19 +240,19 @@ class NumericalData_Classes:
             """
             Taking Laplacian of a 2d Field
             """
-            f_lap = np.sin(X) + np.cos(Y)
-            lap_numeric = NumericalData_Classes.Differentiation_Class.Laplacian(f_lap, axis_x=1, axis_y=0,
-                                                          coord_x=x, coord_y=y)
-            lap_exact = -np.sin(X) - np.cos(Y)
+            f_laplacian = np.sin(X) + np.cos(Y)
+            laplacian_numeric = NumericalData_Classes.Differentiation_Class.Laplacian(f_laplacian, xAxis=1, yAxis=0,
+                                                          xCoord=x, yCoord=y)
+            laplacian_exact = -np.sin(X) - np.cos(Y)
     
             # --- Figure 4: numerical vs exact Laplacian ---
             fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-            cs0 = axes[0].contourf(X, Y, lap_numeric, levels=20)
+            cs0 = axes[0].contourf(X, Y, laplacian_numeric, levels=20)
             fig.colorbar(cs0, ax=axes[0], label="laplacian")
             axes[0].set_title("Numerical Laplacian")
             axes[0].set_xlabel("x"); axes[0].set_ylabel("y")
     
-            cs1 = axes[1].contourf(X, Y, lap_exact, levels=20)
+            cs1 = axes[1].contourf(X, Y, laplacian_exact, levels=20)
             fig.colorbar(cs1, ax=axes[1], label="laplacian")
             axes[1].set_title("Exact Laplacian = -sin(x) - cos(y)")
             axes[1].set_xlabel("x"); axes[1].set_ylabel("y")
@@ -277,33 +280,33 @@ class NumericalData_Classes:
             first index along `axis` is always 0 (nothing integrated yet).
             """
             array = np.asarray(array)
-            slice_at_axis = lambda s: tuple(
+            sliceAtAxis = lambda s: tuple(
                 s if dim == axis else slice(None) for dim in range(array.ndim)
             )
     
-            coord_array = np.asarray(coord)
-            is_nonuniform = coord_array.ndim > 0 and coord_array.size > 1
+            coordArray = np.asarray(coord)
+            isNonUniform = coordArray.ndim > 0 and coordArray.size > 1
     
-            if is_nonuniform:
-                if coord_array.shape[0] != array.shape[axis]:
+            if isNonUniform:
+                if coordArray.shape[0] != array.shape[axis]:
                     raise ValueError(
                         f"coord must have length {array.shape[axis]} (matching array "
-                        f"along axis {axis}), got length {coord_array.shape[0]}"
+                        f"along axis {axis}), got length {coordArray.shape[0]}"
                     )
-                c = coord_array.reshape([-1 if d == axis else 1 for d in range(array.ndim)])
-                dx = c[slice_at_axis(slice(1, None))] - c[slice_at_axis(slice(0, -1))]
+                c = coordArray.reshape([-1 if d == axis else 1 for d in range(array.ndim)])
+                dx = c[sliceAtAxis(slice(1, None))] - c[sliceAtAxis(slice(0, -1))]
             else:
                 dx = float(coord)
     
             # trapezoidal rule: each segment's contribution is the average of
             # its two endpoint values times the segment width
-            segment_avg = (
-                array[slice_at_axis(slice(1, None))] + array[slice_at_axis(slice(0, -1))]
+            segmentAverage = (
+                array[sliceAtAxis(slice(1, None))] + array[sliceAtAxis(slice(0, -1))]
             ) / 2
-            segment_integral = segment_avg * dx
+            segmentIntegral = segmentAverage * dx
     
             result = np.zeros_like(array, dtype=float)
-            result[slice_at_axis(slice(1, None))] = np.cumsum(segment_integral, axis=axis)
+            result[sliceAtAxis(slice(1, None))] = np.cumsum(segmentIntegral, axis=axis)
             return result
     
         @staticmethod
@@ -329,7 +332,7 @@ class NumericalData_Classes:
     class AreaStatistics_Class:
     
         @staticmethod
-        def Ultimate_AreaStatistic(data, dims=('t', 'z', 'y', 'x'), avg_over=('t', 'y', 'x'),
+        def Ultimate_AreaStatistic(data, dims=('t', 'z', 'y', 'x'), average_over=('t', 'y', 'x'),
                                  func=np.nanmean, **func_kwargs):
             """
             Reduce a NumPy array over selected dimensions by name, using any
@@ -338,8 +341,8 @@ class NumericalData_Classes:
             func : np.nanmean, np.nanmedian, np.nansum, np.nanstd, np.nanvar,
                    np.nanmin, np.nanmax, np.nanpercentile (pass q= via func_kwargs), etc.
             """
-            axes = tuple(dims.index(d) for d in avg_over)
-            out_dims = tuple(d for d in dims if d not in avg_over)
+            axes = tuple(dims.index(d) for d in average_over)
+            out_dims = tuple(d for d in dims if d not in average_over)
             out = func(data, axis=axes, **func_kwargs)
             return out, out_dims
     
@@ -347,7 +350,7 @@ class NumericalData_Classes:
         def Test():
             arr4d = np.random.rand(3, 4, 5, 6)  # (t, z, y, x)
             out, dims = NumericalData_Classes.AreaStatistics_Class.Ultimate_AreaStatistic(
-                arr4d, dims=('t', 'z', 'y', 'x'), avg_over=('z', 'y', 'x'), func=np.nanmean,
+                arr4d, dims=('t', 'z', 'y', 'x'), average_over=('z', 'y', 'x'), func=np.nanmean,
             )
             print("input shape :", arr4d.shape)
             print("output shape:", out.shape)

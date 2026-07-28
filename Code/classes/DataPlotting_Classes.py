@@ -7,9 +7,7 @@
 # # How to Import to Code Document
 ########################################
 # import os, sys
-# mainCodeDirectory = os.path.abspath("../..")
-# path = os.path.join(mainCodeDirectory, "classes")
-# sys.path.append(path)
+# sys.path.append(os.path.join(os.path.abspath("../.."), "classes"))
 
 # # Importing
 # from DataPlotting_Classes import DataPlotting_Classes
@@ -731,40 +729,40 @@ class DataPlotting_Classes:
             """
         
             # gather ticks from all axes
-            all_ticks = []
+            allTicks = []
             for ax in axes:
                 ticks = ax.get_xticks() if dim == 'x' else ax.get_yticks()
                 if len(ticks) > 1:
-                    all_ticks.append(ticks)
+                    allTicks.append(ticks)
         
-            if not all_ticks:
+            if not allTicks:
                 return None
         
             # global min and max tick endpoints
-            lo = min(t[0] for t in all_ticks)
-            hi = max(t[-1] for t in all_ticks)
+            lo = min(t[0] for t in allTicks)
+            hi = max(t[-1] for t in allTicks)
         
             # choose a reference tick array with the largest number of ticks
-            ref_ticks = max(all_ticks, key=len)
-        
+            referenceTicks = max(allTicks, key=len)
+
             # but shift its first and last value to the global min/max
-            ref_ticks = ref_ticks.copy()
-            ref_ticks[0] = lo
-            ref_ticks[-1] = hi
+            referenceTicks = referenceTicks.copy()
+            referenceTicks[0] = lo
+            referenceTicks[-1] = hi
         
             # determine the limits corresponding to the tick endpoints
-            ref_lim = (lo, hi)
+            referenceLim = (lo, hi)
         
             # apply to all axes
             for ax in axes:
                 if dim == 'x':
-                    ax.set_xlim(ref_lim)
-                    ax.set_xticks(ref_ticks)
+                    ax.set_xlim(referenceLim)
+                    ax.set_xticks(referenceTicks)
                 else:
-                    ax.set_ylim(ref_lim)
-                    ax.set_yticks(ref_ticks)
+                    ax.set_ylim(referenceLim)
+                    ax.set_yticks(referenceTicks)
         
-            return ref_lim
+            return referenceLim
 
     # FigureSavingFunctions
     # ============================================================

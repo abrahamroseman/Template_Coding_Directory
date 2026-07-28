@@ -7,9 +7,7 @@
 # # How to Import to Code Document
 ########################################
 # import os, sys
-# mainCodeDirectory = os.path.abspath("../..")
-# path = os.path.join(mainCodeDirectory, "classes")
-# sys.path.append(path)
+# sys.path.append(os.path.join(os.path.abspath("../.."), "classes"))
 
 # # Importing
 # from VectorizedOperations_Classes import VectorizedOperations_Classes
