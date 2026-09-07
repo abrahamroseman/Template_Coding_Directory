@@ -356,7 +356,7 @@ class OutputData_Classes:
             # Save (this also writes the log entry, nested under dataName/subFileName)
             self.SaveOutput(
                 outputDictionary=outputDictionary,
-                folderName="1_Folder_One", subFolderName= "Demo", scriptName="DemoScript", 
+                folderName="Demo_Folder", subFolderName= "Demo", scriptName="DemoScript", 
                 dataName="Testing_Data_Output_And_Loading",subDataName="testSubDataName",
                 fileName="testFileName",subFileName=f"time_{t}",
                 dtype="int16",
@@ -369,7 +369,7 @@ class OutputData_Classes:
         
             # Load back using scriptName + dataName + subFileName (via the log)
             [loadedDictionary] = self.LoadOutput(
-                folderName="1_Folder_One", scriptName="DemoScript", dataName="Testing_Data_Output_And_Loading",
+                folderName="Demo_Folder", scriptName="DemoScript", dataName="Testing_Data_Output_And_Loading",
                 subFileName=f"time_{t}")
         
             # Check input/output data
