@@ -1,0 +1,32 @@
+#!/bin/bash
+export TZ=UTC
+
+### Load token
+source ~/.tokens
+GITHUB_TOKEN=$(get_github_token)
+
+### Go to Directory
+cd ~/Desktop/Research/Projects/Template_Project_Directory/Coding_Directory || exit
+
+### Add updates
+git add .
+git status
+
+### Ask user if they want to continue
+echo "Do you want to continue with commit? (y/n)"
+read -r confirm
+
+if [ "$confirm" != "y" ]; then
+    echo "Exiting without commit."
+    exit 0
+fi
+
+### Enter Commit Message
+echo "Enter your commit message:"
+read -r commitMessage
+TZ=UTC git commit -m "$commitMessage"
+
+git pull --rebase origin main
+
+git remote set-url origin "https://abrahamroseman:${GITHUB_TOKEN}@github.com/abrahamroseman/Template_Coding_Directory"
+git push origin main
