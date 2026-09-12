@@ -1,7 +1,7 @@
 .DS_Store
 .ipynb_checkpoints
-/Input/data/**
+/Input/Data/**
 /Input/Model/**
-/Output/data/**
+/Output/Data/**
 /Output/Figures/**
 *.json
