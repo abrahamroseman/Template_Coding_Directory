@@ -101,6 +101,20 @@ class DataPlotting_Classes:
                 cbar.ax.xaxis.label.set_fontsize(fontStyles["cbarLabel"]["fontsize"])
                 cbar.ax.xaxis.label.set_fontfamily(fontStyles["cbarLabel"]["fontfamily"])
         
+        # @staticmethod
+        # def GenerateTicksAndLim(data, nTicks=6, nLevels=15):
+        #     if isinstance(data, (list, tuple)) and len(data) > 0 and not np.isscalar(data[0]):
+        #         data = np.concatenate([np.asarray(d).ravel() for d in data])
+        #     else:
+        #         data = np.asarray(data)
+        
+        #     dMin, dMax = np.nanmin(data), np.nanmax(data)
+        #     locator = MaxNLocator(nbins=nTicks - 1)
+        #     ticks = locator.tick_values(dMin, dMax)
+        #     lim = (ticks[0], ticks[-1])
+
+        #     levels = np.linspace(lim[0], lim[1], nLevels)
+        #     return [ticks,lim,levels]
         @staticmethod
         def GenerateTicksAndLim(data, nTicks=6, nLevels=15):
             if isinstance(data, (list, tuple)) and len(data) > 0 and not np.isscalar(data[0]):
@@ -112,9 +126,16 @@ class DataPlotting_Classes:
             locator = MaxNLocator(nbins=nTicks - 1)
             ticks = locator.tick_values(dMin, dMax)
             lim = (ticks[0], ticks[-1])
-
-            levels = np.linspace(lim[0], lim[1], nLevels)
-            return [ticks,lim,levels]
+        
+            # Snap nLevels to the nearest value that's an exact multiple of the
+            # actual tick spacing, so every tick lands precisely on a level edge
+            # instead of only the first/last.
+            nTickGaps = len(ticks) - 1
+            subdivisionsPerTick = max(1, round((nLevels - 1) / nTickGaps))
+            nLevelsActual = nTickGaps * subdivisionsPerTick + 1
+        
+            levels = np.linspace(lim[0], lim[1], nLevelsActual)
+            return [ticks, lim, levels]
 
         @staticmethod
         def ComputeColorRange(data, method=None):
