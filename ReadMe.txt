@@ -4,10 +4,10 @@ Coding_Directory_Template/
 │   └── classes/         # classes and other functions
 │   └── run_scripts/     # batch scripts and files for running code on Slurm/PBS systems
 ├── Input/
-│   ├── data/            # data sources
+│   ├── Data/            # data sources
 │   └── Model/           # numerical model source code and output
 └── Output/
-    ├── data/             # generated/processed data
+    ├── Data/             # generated/processed data
     └── Figures/          # plots, animations
 
 For GitHub:
@@ -15,8 +15,8 @@ For GitHub:
 2. Add textfile .gitignore with:
     .DS_Store
     .ipynb_checkpoints
-    /Input/data/**
+    /Input/Data/**
     /Input/Model/**
-    /Output/data/**
+    /Output/Data/**
     /Output/Figures/**
     *.json
