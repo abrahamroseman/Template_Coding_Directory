@@ -10,9 +10,13 @@ Coding_Directory_Template/
     ├── Data/             # generated/processed data
     └── Figures/          # plots, animations
 
+On Local Machine:
+1. Create project-specific folder.
+2. Copy "Coding_Directory_Template" folder into project folder.
+
 For GitHub:
-1. Store .git here.
-2. Add textfile .gitignore with:
+1. Store .git here in the "Coding_Directory_Template" folder.
+2. Add textfile .gitignore here with:
     .DS_Store
     .ipynb_checkpoints
     /Input/Data/**
@@ -20,3 +24,4 @@ For GitHub:
     /Output/Data/**
     /Output/Figures/**
     *.json
+3. Repo name can be the name of the project-specific folder.
