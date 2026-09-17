@@ -1,13 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=python
-##SBATCH --account=torri
-##SBATCH --partition=torri
-
+##SBATCH --account=<account>
+##SBATCH --partition=<account>
 #SBATCH --partition=shared
 
 #SBATCH --time=0-03:00:00
-#SBATCH --nodes=1 
-#SBATCH  --tasks-per-node=1  
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=1 #Each node has 47 CPUs
 #SBATCH --mem=10G #GBTotal 180GB per node (180G/30 = 6G) #0 for full node memory
 
@@ -15,10 +14,11 @@
 #SBATCH --output=pybash_job-%A.out
 ## Remote notification
 #SBATCH --mail-type=BEGIN,END,FAIL,REQUEUE,TIME_LIMIT_80
-#SBATCH --mail-user=air673@hawaii.edu
+#SBATCH --mail-user=<email@address.com>
 
+# Run everything from the sbatch folder (where this script was submitted)
+cd "$SLURM_SUBMIT_DIR"
 mkdir -p job_out
-#exec >> "job_out/py-$SLURM_ARRAY_TASK_ID.out" 2>&1 #don't use if you are piping to .out file below
 
 #LOADING MODULES
 module purge
@@ -32,12 +32,15 @@ export PYTHONUNBUFFERED=TRUE #allows print statements during run
 # --- RUNNING PYTHON ---
 
 # ONE
-mkdir -p job_out/pybash1
-jupyter nbconvert --to script pybash1.ipynb
-python -u pybash1.py $SLURM_ARRAY_TASK_ID \
-     > job_out/pybash1/py-${SLURM_ARRAY_TASK_ID}.out 2>&1
+scriptName=PythonScript1
+mkdir -p job_out/${scriptName}
+jupyter nbconvert --to script ../${scriptName}.ipynb --output-dir .
+python -u ${scriptName}.py $SLURM_ARRAY_TASK_ID \
+     > job_out/${scriptName}/py-${SLURM_ARRAY_TASK_ID}.out 2>&1
 
-# TWO
-#mkdir -p job_out/pybash2
-#python -u pybash2.py $SLURM_ARRAY_TASK_ID \
-#    > job_out/pybash2/py-${SLURM_ARRAY_TASK_ID}.out 2>&1
+## TWO
+#scriptName=PythonScript2
+#mkdir -p job_out/${scriptName}
+#jupyter nbconvert --to script ../${scriptName}.ipynb --output-dir .
+#python -u ${scriptName}.py $SLURM_ARRAY_TASK_ID \
+#     > job_out/${scriptName}/py-${SLURM_ARRAY_TASK_ID}.out 2>&1
