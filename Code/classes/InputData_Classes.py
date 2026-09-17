@@ -260,7 +260,7 @@ class InputData_Classes:
                 seconds = [Read(f) for f in fileList]
             elif method == "constructed":
                 t0 = Read(fileList[0])
-                dt = Read(fileList[1]) - t0; print(dt)#*
+                dt = Read(fileList[1]) - t0;
                 seconds = t0 + np.arange(len(fileList)) * dt
                 if not np.isclose(seconds[-1], Read(fileList[-1])):
                     raise ValueError("Files missing or unevenly spaced; use method='netCDF4'.")

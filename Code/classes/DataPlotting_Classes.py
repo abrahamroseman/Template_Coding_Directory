@@ -32,6 +32,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.ticker import ScalarFormatter
 from matplotlib.ticker import MaxNLocator
 from matplotlib.colors import TwoSlopeNorm
+import matplotlib.colors as mcolors
 
 #Class
 class DataPlotting_Classes:
@@ -892,3 +893,154 @@ class DataPlotting_Classes:
                 ImageSaver = DataPlotting_Classes.FigureSavingFunctions.ImageSaver_Class
                 ImageSaver.Save(fig1, "test_image", extension="png",verbose=True)
 
+    # Colormap_Class
+    # ============================================================
+    class Colormap_Class:
+
+        @staticmethod
+        def GetReflectivityColormap(bounds=(-35, 0, 20, 40, 50, 65, 85)):
+            """NOAA JetStream reflectivity ramp, light→dark within each category."""
+            segmentColors = [
+                ("#f7f7f7", "#a8a8a8"),   # -35–0  grey
+                ("#b3caff", "#0033cc"),   # 0–20   blue
+                ("#99ff99", "#006600"),   # 20–40  green
+                ("#ffe680", "#ff9900"),   # 40–50  yellow–orange
+                ("#ff6666", "#990000"),   # 50–65  red
+                ("#e6b3ff", "#660066"),   # 65–85  purple
+            ]
+            bounds = np.asarray(bounds, dtype=float)
+            xNorm = (bounds - bounds[0]) / (bounds[-1] - bounds[0])
+        
+            cdict = {'red': [], 'green': [], 'blue': []}
+            for i, (c1, c2) in enumerate(segmentColors):
+                rgb1, rgb2 = mcolors.to_rgb(c1), mcolors.to_rgb(c2)
+                for j, key in enumerate(('red', 'green', 'blue')):
+                    cdict[key].extend([(xNorm[i],   rgb1[j], rgb1[j]),
+                                       (xNorm[i+1], rgb2[j], rgb2[j])])
+        
+            cmap = mcolors.LinearSegmentedColormap("radar_reflectivity", cdict)
+            cmap.set_under('none'); cmap.set_bad('none')
+            norm = mcolors.Normalize(vmin=bounds[0], vmax=bounds[-1])
+            ticks = bounds
+            return [cmap, norm, ticks]
+
+
+# In[ ]:
+
+# Animation_Class
+# ============================================================
+
+# Libraries
+import os
+
+# Animation Specific Libraries
+from PIL import Image
+from moviepy import ImageSequenceClip
+from moviepy.video.fx import MultiplySpeed
+
+#Class
+class Animation_Class:
+    @staticmethod
+    def PNGsToMP4(imageFiles, outputFile, 
+                  fps=2, speed=1.0, bitrate='1500k', resize=False):
+        """
+        Convert a sequence of PNG images directly to a widely compatible MP4.
+        
+        Make sure to choose image resolution when outputting png images using SaveUniformFigure.
+        If there is an error, use resize = True
+        """
+        import os
+        from PIL import Image
+        
+        # --- Use the import paths from your original code ---
+        from moviepy import ImageSequenceClip
+        from moviepy.video.fx import MultiplySpeed 
+    
+        if not imageFiles:
+            raise ValueError("No image files provided for MP4 conversion.")
+    
+        # We'll default to using the original files
+        clip_input = imageFiles
+        # This list will hold the paths to the temp files we create
+        temp_files_to_clean = [] 
+    
+        if resize == True:
+            print("Resizing images via temporary files...")
+            with Image.open(imageFiles[0]) as im:
+                w, h = im.size
+            
+            # --- Round width and height UP to even numbers ---
+            if w % 2 != 0:
+                w += 1
+            if h % 2 != 0:
+                h += 1
+            
+            target_size = (w, h)
+            
+            # This list will hold the final paths (original or temp)
+            uniform_images = [] 
+            
+            # --- Ensure all images match the even target size ---
+            for img_path in imageFiles:
+                with Image.open(img_path) as im:
+                    if im.size != target_size:
+                        # Create and save a temporary resized file
+                        resized = im.resize(target_size, Image.Resampling.LANCZOS)
+                        tmp_path = img_path.replace(".png", "_tmp.png")
+                        resized.save(tmp_path)
+                        
+                        uniform_images.append(tmp_path)
+                        temp_files_to_clean.append(tmp_path) # Add to cleanup list
+                    else:
+                        # Use the original file path
+                        uniform_images.append(img_path)
+            
+            # Point the clip generator to our list of uniform-sized images
+            clip_input = uniform_images
+            print("Temporary file resizing complete.")
+    
+        else:
+            clip_input = imageFiles
+    
+    
+        # --- Create video clip ---
+        # This will use the paths in 'clip_input'
+        clip = ImageSequenceClip(clip_input, fps=fps)
+    
+        # --- Adjust playback speed if needed ---
+        if speed != 1.0:
+            clip = MultiplySpeed(speed).apply(clip)
+    
+        # --- FFMPEG Parameters ---
+        ffmpeg_params = [
+            "-pix_fmt", "yuv420p",
+            "-profile:v", "main",
+            "-movflags", "+faststart"
+        ]
+    
+        # # If we didn't resize, add the padding filter to prevent the BrokenPipeError
+        # if resize == False:
+        #     ffmpeg_params.extend(["-vf", "pad='iw:ceil(ih/2)*2'"])
+    
+        # --- Export to MP4 ---
+        clip.write_videofile(
+            outputFile,
+            codec="libx264",
+            bitrate=bitrate,
+            audio=False,
+            ffmpeg_params=ffmpeg_params,
+            preset="medium",
+            threads=4
+        )
+        clip.close()
+    
+        print(f"MP4 saved to: {outputFile} (fps={fps}, speed={speed})")
+        
+        # --- Clean up temporary resized PNGs ---
+        if temp_files_to_clean:
+            print(f"Cleaning up {len(temp_files_to_clean)} temporary files...")
+            for tmp in temp_files_to_clean:
+                try:
+                    os.remove(tmp)
+                except Exception as e:
+                    print(f"Warning: could not remove temp file {tmp}: {e}")
