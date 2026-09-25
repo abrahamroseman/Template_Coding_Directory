@@ -11,8 +11,8 @@
 #SBATCH --cpus-per-task=1 #Each node has 47 CPUs
 #SBATCH --mem=10G #GBTotal 180GB per node (180G/30 = 6G) #0 for full node memory
 
-#SBATCH --error=pybash_job-%A_%a.err
-#SBATCH --output=pybash_job-%A_%a.out
+#SBATCH --error=pybash_job-%A.err
+#SBATCH --output=pybash_job-%A.out
 ## Remote notification
 #SBATCH --mail-type=BEGIN,END,FAIL,REQUEUE,TIME_LIMIT_80
 #SBATCH --mail-user=<email@address.com>
@@ -31,7 +31,9 @@ export HDF5_USE_FILE_LOCKING=FALSE #disable HDF5 file locking
 export PYTHONUNBUFFERED=TRUE #allows print statements during run
 
 # --- RUNNING PYTHON ---
+# (First make directory (e.g. "job_array") in the same folder where code is, then add this script file there)
 # (convert first: jupyter nbconvert --to script ../<name>.ipynb --output-dir .)
+# (or use \batch\convert_ipynb_to_py.run)
 
 # ONE
 scriptName=PythonScript1
