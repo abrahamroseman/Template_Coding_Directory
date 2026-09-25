@@ -627,7 +627,7 @@ class OutputData_Classes:
         into a set number of jobs to run with "job array" in HPC systems (i.e. slurm, PBS, etc)
         """
         def __init__(self, totalElements, 
-                     numJobs, usingJobArray,
+                     numJobs, usingJobArray=True,
                      custom_job_id=None,
                      verbose=True):
             self.totalElements = totalElements
@@ -648,6 +648,7 @@ class OutputData_Classes:
             
             # Compute job range for this job
             self.start_job, self.end_job = self.GetJobRange(self.job_id)
+            self.loop_elements = self.GetLoopElements()
     
             # Print summary
             if verbose:
@@ -657,9 +658,9 @@ class OutputData_Classes:
         # ========== Summary Function ==========
         # ============================================================    
 
-    
         def Summary(self):
-            print(f"Running timesteps from {self.start_job}:{self.end_job-1}","\n")
+            job_idLabel = f" for job_id {self.job_id}" if self.usingJobArray else ""
+            print(f"Running timesteps from {self.start_job+1}:{self.end_job}{job_idLabel}","\n")
 
         # ============================================================
         # ========== Functions ==========
@@ -677,12 +678,11 @@ class OutputData_Classes:
                 [start_job, end_job] = [0, self.totalElements]
             return [start_job, end_job]
 
-        def GetLoopElements(start_job,end_job,
-                            allowedElements=None):
-            loop_elements = np.arange(self.total_elements)[start_job:end_job]
+        def GetLoopElements(self,allowedElements=None):
+            loop_elements = np.arange(self.totalElements)[self.start_job:self.end_job]
             if allowedElements is not None:
                 loop_elements = loop_elements[np.isin(loop_elements, allowedElements)]
-            return loop_elements
+            return loop_elements.tolist()
     
         # ============================================================
         # ========== Test Functions ==========

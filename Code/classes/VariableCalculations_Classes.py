@@ -22,6 +22,8 @@
 # Libraries
 import os, sys
 import numpy as np
+import xarray as xr
+from NumericalData_Classes import NumericalData_Classes
 
 #Class
 class VariableCalculations_Classes:
@@ -30,6 +32,108 @@ class VariableCalculations_Classes:
     Class for calculating various variables in atmospheric science given 
     model output data.
     """
+
+    class Dynamics:
+        """Dynamical variables."""
+
+        # ============================================================
+        # ========== Helpers ==========
+        # ============================================================
+
+        @staticmethod
+        def HorizontalDivergence(uField, vField, data, xDim='xh', yDim='yh'):
+            """
+            du/dx + dv/dy for two xr.DataArrays on scalar points, returned as an
+            xr.DataArray. Centered differences in the interior, one-sided at edges.
+            """
+            Diff = NumericalData_Classes.Differentiation_Class
+            div = Diff.Divergence(uField.values, vField.values,
+                                  uAxis=uField.get_axis_num(xDim),
+                                  vAxis=vField.get_axis_num(yDim),
+                                  uCoord=data[xDim].values * 1000,   # km -> m (CM1)
+                                  vCoord=data[yDim].values * 1000)
+            return xr.DataArray(div, dims=uField.dims, coords=uField.coords)
+
+        # ============================================================
+        # ========== Calculations ==========
+        # ============================================================
+
+        @classmethod
+        def AddConvergence(self, data, uVar='uinterp', vVar='vinterp'):
+            """
+            Horizontal convergence (1/s):
+                conv = -(du/dx + dv/dy)
+            Positive = convergence, negative = divergence.
+            """
+            conv = -self.HorizontalDivergence(data[uVar], data[vVar], data)
+            conv.attrs = {'long_name': 'horizontal convergence', 'units': 's$^{-1}$'}
+            return data.assign(conv=conv)
+
+        @classmethod
+        def AddMoistureConvergence(self, data, uVar='uinterp', vVar='vinterp',
+                                   qVar='qv', rhoVar='rho'):
+            """
+            Horizontal moisture flux convergence (kg m^-3 s^-1):
+                HMC = -(d(rho*qv*u)/dx + d(rho*qv*v)/dy)
+            Positive = moisture convergence.
+            """
+            rhoq = data[rhoVar] * data[qVar]            # water vapor density
+            HMC = -self.HorizontalDivergence(rhoq * data[uVar], rhoq * data[vVar], data)
+            HMC.attrs = {'long_name': 'horizontal moisture flux convergence',
+                         'units': 'kg m$^{-3}$ s$^{-1}$'}
+            return data.assign(HMC=HMC)
+
+        @classmethod
+        def AddMoistureGradient(self, data, qVar='qv', rhoVar='rho',
+                                xDim='xh', yDim='yh'):
+            """
+            Horizontal moisture gradient terms (kg m^-4):
+                d(rho*qv)/dx, d(rho*qv)/dy
+            Consistent with HMC, whose advection part is -(u*d(rho*qv)/dx + v*d(rho*qv)/dy).
+            """
+            Diff = NumericalData_Classes.Differentiation_Class
+            rhoq = data[rhoVar] * data[qVar]            # water vapor density
+
+            dqdx = Diff.Derivative(rhoq.values, axis=rhoq.get_axis_num(xDim),
+                                   coord=data[xDim].values * 1000)   # km -> m (CM1)
+            dqdy = Diff.Derivative(rhoq.values, axis=rhoq.get_axis_num(yDim),
+                                   coord=data[yDim].values * 1000)
+
+            dqdx = xr.DataArray(dqdx, dims=rhoq.dims, coords=rhoq.coords)
+            dqdy = xr.DataArray(dqdy, dims=rhoq.dims, coords=rhoq.coords)
+            dqdx.attrs = {'long_name': 'zonal moisture gradient', 'units': 'kg m$^{-4}$'}
+            dqdy.attrs = {'long_name': 'meridional moisture gradient', 'units': 'kg m$^{-4}$'}
+            return data.assign(dqdx=dqdx, dqdy=dqdy)
+
+        @classmethod
+        def AddTKE(self, data, windVars=('uinterp', 'vinterp', 'winterp')):
+            """
+            Resolved turbulent kinetic energy (m^2/s^2):
+                TKE = 0.5 * (u'^2 + v'^2 + w'^2)
+            with primes as deviations from the horizontal-mean vertical profile.
+            """
+            Perts = VariableCalculations_Classes.Perturbations
+            TKE = 0.5 * sum(Perts.CalculatePerturbation(data, v) ** 2
+                            for v in windVars)
+            TKE.attrs = {'long_name': 'resolved turbulent kinetic energy',
+                         'units': 'm$^{2}$ s$^{-2}$'}
+            return data.assign(TKE=TKE)
+    class Moisture:
+        # ============================================================
+        # ========== Calculations ==========
+        # ============================================================
+        @classmethod
+        def AddQt(self, data, condensate=('qc', 'qi')):
+            """
+            Total water mixing ratio (kg/kg):
+                qt = qv + qc + qi
+            (snow/graupel/rain excluded by default -- pass condensate=(...,'qs','qg','qr') to include them)
+            """
+            qCond = sum(data[q] for q in condensate if q in data)
+            qt = data.qv + qCond
+            qt.attrs = {'long_name': 'total water mixing ratio', 'units': 'kg kg$^{-1}$'}
+            return data.assign(qt=qt)
+    
     class Thermodynamics:
         """
         Thermodynamic variables.
@@ -156,6 +260,20 @@ class VariableCalculations_Classes:
                        * np.exp(self.LatentHeat(T) * rv / (divisor * T)))
             th_e.attrs = {'long_name': 'equivalent potential temperature', 'units': 'K'}
             return data.assign(th_e=th_e)
+        
+        @classmethod
+        def AddThetaL(self, data, liquid=('qc', 'qr')):
+            """
+            Liquid-water potential temperature (approximation, Emanuel 1994):
+                th_l = th * exp(-Lv(T) * ql / (Cpd * T))
+            where ql = sum(liquid). Uses actual temperature T (not th) for the
+            Lv(T)/Cpd/T terms, consistent with AddTemperature/LatentHeat.
+            """
+            T = self.AddTemperature(data)['T']
+            ql = sum(data[q] for q in liquid if q in data)
+            th_l = data.th * np.exp(-self.LatentHeat(T, 'vaporization') * ql / (self.Cpd * T))
+            th_l.attrs = {'long_name': 'liquid water potential temperature', 'units': 'K'}
+            return data.assign(th_l=th_l)
 
     class Perturbations:
         """Horizontal-mean perturbations and buoyancy."""
@@ -171,6 +289,27 @@ class VariableCalculations_Classes:
             return (pert, ref) if returnMean else pert
 
         @classmethod
+        def AddClearAirPerturbation(self, data, varName='qv', cloudVars=('qc', 'qi'), cloudThreshold=1e-5,
+                                    horizDims=('xh', 'xf', 'yh', 'yf')):
+            """
+            Perturbation of varName from its clear-air (non-cloudy) horizontal mean:
+                varName' = varName - mean(varName where qc+qi <= cloudThreshold)
+            Unlike CalculatePerturbation (full-domain mean), this excludes cloudy
+            gridpoints from the reference.
+            """
+            qCond = sum(data[q] for q in cloudVars if q in data)
+            isClear = qCond <= cloudThreshold
+            dims = [d for d in data[varName].dims if d in horizDims]
+        
+            clearVar = data[varName].where(isClear)             # NaN out cloudy points
+            ref = clearVar.mean(dim=dims, skipna=True)           # clear-air horizontal mean, per height
+        
+            pert = (data[varName] - ref).rename(varName + '_prime_fromclearair')
+            pert.attrs = dict(data[varName].attrs)
+            pert.attrs['long_name'] = varName + "' (relative to clear-air background)"
+            return data.assign(**{pert.name: pert})
+
+        @classmethod
         def AddBuoyancy(self, data, varName='th_v', g=9.81):
             pert, ref = self.CalculatePerturbation(data, varName,
                                                   returnMean=True)
@@ -184,92 +323,6 @@ class VariableCalculations_Classes:
                 p = self.CalculatePerturbation(data, v)
                 data = data.assign(**{p.name: p})
             return data
-
-    class Dynamics:
-        """Dynamical variables."""
-
-        # ============================================================
-        # ========== Helpers ==========
-        # ============================================================
-
-        @staticmethod
-        def HorizontalDivergence(uField, vField, data, xDim='xh', yDim='yh'):
-            """
-            du/dx + dv/dy for two xr.DataArrays on scalar points, returned as an
-            xr.DataArray. Centered differences in the interior, one-sided at edges.
-            """
-            Diff = NumericalData_Classes.Differentiation_Class
-            div = Diff.Divergence(uField.values, vField.values,
-                                  uAxis=uField.get_axis_num(xDim),
-                                  vAxis=vField.get_axis_num(yDim),
-                                  uCoord=data[xDim].values * 1000,   # km -> m (CM1)
-                                  vCoord=data[yDim].values * 1000)
-            return xr.DataArray(div, dims=uField.dims, coords=uField.coords)
-
-        # ============================================================
-        # ========== Calculations ==========
-        # ============================================================
-
-        @classmethod
-        def AddTKE(self, data, windVars=('uinterp', 'vinterp', 'winterp')):
-            """
-            Resolved turbulent kinetic energy (m^2/s^2):
-                TKE = 0.5 * (u'^2 + v'^2 + w'^2)
-            with primes as deviations from the horizontal-mean vertical profile.
-            """
-            Perts = VariableCalculations_Classes.Perturbations
-            TKE = 0.5 * sum(Perts.CalculatePerturbation(data, v) ** 2
-                            for v in windVars)
-            TKE.attrs = {'long_name': 'resolved turbulent kinetic energy',
-                         'units': 'm$^{2}$ s$^{-2}$'}
-            return data.assign(TKE=TKE)
-
-        @classmethod
-        def AddConvergence(self, data, uVar='uinterp', vVar='vinterp'):
-            """
-            Horizontal convergence (1/s):
-                conv = -(du/dx + dv/dy)
-            Positive = convergence, negative = divergence.
-            """
-            conv = -self.HorizontalDivergence(data[uVar], data[vVar], data)
-            conv.attrs = {'long_name': 'horizontal convergence', 'units': 's$^{-1}$'}
-            return data.assign(conv=conv)
-
-        @classmethod
-        def AddMoistureConvergence(self, data, uVar='uinterp', vVar='vinterp',
-                                   qVar='qv', rhoVar='rho'):
-            """
-            Horizontal moisture flux convergence (kg m^-3 s^-1):
-                HMC = -(d(rho*qv*u)/dx + d(rho*qv*v)/dy)
-            Positive = moisture convergence.
-            """
-            rhoq = data[rhoVar] * data[qVar]            # water vapor density
-            HMC = -self.HorizontalDivergence(rhoq * data[uVar], rhoq * data[vVar], data)
-            HMC.attrs = {'long_name': 'horizontal moisture flux convergence',
-                         'units': 'kg m$^{-3}$ s$^{-1}$'}
-            return data.assign(HMC=HMC)
-
-        @classmethod
-        def AddMoistureGradient(self, data, qVar='qv', rhoVar='rho',
-                                xDim='xh', yDim='yh'):
-            """
-            Horizontal moisture gradient terms (kg m^-4):
-                d(rho*qv)/dx, d(rho*qv)/dy
-            Consistent with HMC, whose advection part is -(u*d(rho*qv)/dx + v*d(rho*qv)/dy).
-            """
-            Diff = NumericalData_Classes.Differentiation_Class
-            rhoq = data[rhoVar] * data[qVar]            # water vapor density
-
-            dqdx = Diff.Derivative(rhoq.values, axis=rhoq.get_axis_num(xDim),
-                                   coord=data[xDim].values * 1000)   # km -> m (CM1)
-            dqdy = Diff.Derivative(rhoq.values, axis=rhoq.get_axis_num(yDim),
-                                   coord=data[yDim].values * 1000)
-
-            dqdx = xr.DataArray(dqdx, dims=rhoq.dims, coords=rhoq.coords)
-            dqdy = xr.DataArray(dqdy, dims=rhoq.dims, coords=rhoq.coords)
-            dqdx.attrs = {'long_name': 'zonal moisture gradient', 'units': 'kg m$^{-4}$'}
-            dqdy.attrs = {'long_name': 'meridional moisture gradient', 'units': 'kg m$^{-4}$'}
-            return data.assign(dqdx=dqdx, dqdy=dqdy)
 
 # #--------------------------------------------------
 # #Example Running
