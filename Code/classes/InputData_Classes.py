@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[30]:
 
 
 # # How to Import to Code Document
@@ -15,7 +15,7 @@
 # from InputData_Classes import InputData_Classes
 
 
-# In[ ]:
+# In[45]:
 
 
 # InputData_Classes
@@ -30,6 +30,7 @@ from types import SimpleNamespace
 import numpy as np
 import xarray as xr; import h5py; import json
 import netCDF4
+import fcntl
 
 class InputData_Classes:
 
@@ -64,11 +65,13 @@ class InputData_Classes:
                      dataTypes=None,
                      timeCoord="time",
                      initialTimeLT=None,
+                     applyDomainSubset=False,
                      metaData=None,
                      verbose=False):
 
             self.metaData = metaData or {}
             self.timeCoord = timeCoord
+            self.applyDomainSubset = applyDomainSubset
             self.verbose = verbose
 
             for key, value in self.metaData.items():
@@ -89,7 +92,7 @@ class InputData_Classes:
             for dataTypeName, config in dataTypeConfig.items():
                 userInitialTimeLT = (initialTimeLT.get(dataTypeName) if isinstance(initialTimeLT, dict)
                                       else initialTimeLT)
-                [dataset] = self.LoadDataset(config, self.timeCoord, userInitialTimeLT, self.verbose)
+                [dataset] = self.LoadDataset(config, self.timeCoord, userInitialTimeLT, self.applyDomainSubset, self.verbose)
                 setattr(self, dataTypeName, dataset)
 
             if self.verbose:
@@ -137,7 +140,7 @@ class InputData_Classes:
         # ========== Per-Dataset Loading ==========
         # ============================================================
 
-        def LoadDataset(self, config, timeCoord, userInitialTimeLT, verbose):
+        def LoadDataset(self, config, timeCoord, userInitialTimeLT, applyDomainSubset, verbose):
             """
             Load one dataset (e.g. "eulerianData" or "lagrangianData") from its config
             dict and return it as a SimpleNamespace bundling fileList,
@@ -147,6 +150,7 @@ class InputData_Classes:
             filePattern = config["filePattern"]
             excludePatterns = config.get("excludePatterns")
             coordNames = list(config.get("coordNames", ()))
+            domainSubsetBounds = config.get("domainSubsetBounds") if applyDomainSubset else None
 
             [fileList] = self.GetFileList(dataDirectory, filePattern, excludePatterns)
             isDataTimestepByTimestep = len(fileList) > 1
@@ -159,7 +163,7 @@ class InputData_Classes:
                 coordNames=coordNames,
             )
 
-            [coordinateData] = self.GetCoordinateData(fileList, coordNames, verbose)
+            [coordinateData] = self.GetCoordinateData(fileList, coordNames, domainSubsetBounds, verbose)
             for key, value in coordinateData.items():
                 setattr(dataset, key, value)
                 setattr(dataset, f"N{key}", len(np.atleast_1d(value)))
@@ -187,13 +191,15 @@ class InputData_Classes:
             [varList] = self.GetVariableNames(fileList)
             dataset.varList = varList
 
-            dataset.domainSubsetBounds = config.get("domainSubsetBounds")
+            dataset.domainSubsetBounds = domainSubsetBounds
             
             dataset.OpenData = lambda file=None, **kwargs: (
-                InputData_Classes.DataOpeners.OpenData(fileList, concatDim=timeCoord, file=file, **kwargs)[0])
+                InputData_Classes.DataOpeners.OpenData(fileList, concatDim=timeCoord, file=file, 
+                                                       domainSubsetBounds=domainSubsetBounds,
+                                                       **kwargs)[0])
             dataset.SaveH5 = lambda data, file, label, **kwargs: (
                 InputData_Classes.DataExporters.SaveH5(dataset, data, file, label, **kwargs))
-            dataset.LoadH5 = lambda label, file=None: (
+            dataset.LoadH5 = lambda label, file=0: (
                 InputData_Classes.DataExporters.LoadH5(dataset, label, file)[0])
             return [dataset]
 
@@ -228,7 +234,7 @@ class InputData_Classes:
         # ========== Data Loading Functions ==========
         # ============================================================
 
-        def GetCoordinateData(self, fileList, coordNames, verbose):
+        def GetCoordinateData(self, fileList, coordNames, domainSubsetBounds, verbose):
             """
             Extract the requested coordinate arrays from the FIRST file.
             Coordinates listed in coordNames but missing from the file are
@@ -236,6 +242,9 @@ class InputData_Classes:
             """
             extracted = {}
             with xr.open_dataset(fileList[0], decode_timedelta=True) as ds:
+                if domainSubsetBounds:
+                    bounds = {k: v for k, v in domainSubsetBounds.items() if k in ds}
+                    ds = ds.sel(**bounds)
                 for k in coordNames:
                     if k in ds:
                         extracted[k] = ds[k].values
@@ -429,7 +438,7 @@ class InputData_Classes:
                     "excludePatterns": ("cm1out_pdata*.nc", "cm1out_stats*.nc"),
                     "coordNames": ("time", "zf", "zh", "yf", "yh", "xf", "xh"),
                     "initialTimeAttrs": {"hour": "hour", "minute": "minute"},
-                    "domainSubsetBounds": {"xh": slice(20, 280), "zf": slice(0, 16)}, #... etc #in same units of the coords
+                    "domainSubsetBounds": {"xh": slice(20, 280),}, #... etc #in same units of the coords
 
                 },
                 "lagrangianData": {
@@ -469,21 +478,22 @@ class InputData_Classes:
         an xarray Dataset, given a file list and optional file-index selection."""
     
         @staticmethod
-        def OpenData(fileList, concatDim="time", file=None, **kwargs):
+        def OpenData(fileList, concatDim="time", file=None, domainSubsetBounds=None, **kwargs):
             """
             Open one or more netCDF files as a single xarray Dataset.
             ***Caller is responsible for closing [.close()] and deleting (del) the returned Dataset for IO efficiency
             (i.e. opening many files in a loop).***
             """
             fileList = [fileList] if isinstance(fileList, str) else list(fileList)
-    
             [selectedFiles] = InputData_Classes.DataOpeners.SelectFiles(fileList, file)
-    
+        
             if len(selectedFiles) == 1:
-                [ds] = InputData_Classes.DataOpeners.OpenSingleFile(selectedFiles[0], **kwargs)
+                [ds] = InputData_Classes.DataOpeners.OpenSingleFile(
+                    selectedFiles[0], domainSubsetBounds=domainSubsetBounds, **kwargs)
             else:
-                [ds] = InputData_Classes.DataOpeners.OpenMultipleFiles(selectedFiles, concatDim, **kwargs)
-    
+                [ds] = InputData_Classes.DataOpeners.OpenMultipleFiles(
+                    selectedFiles, concatDim, domainSubsetBounds=domainSubsetBounds, **kwargs)
+        
             return [ds]
     
         @staticmethod
@@ -496,20 +506,24 @@ class InputData_Classes:
                 return [[fileList[file]]]
             indices = list(file)
             return [[fileList[i] for i in indices]]
-    
+            
         @staticmethod
-        def OpenSingleFile(filePath, **kwargs):
-            """Helper: open a single netCDF file as an xarray Dataset."""
+        def OpenSingleFile(filePath, domainSubsetBounds=None, **kwargs):
             ds = xr.open_dataset(filePath, decode_timedelta=True, **kwargs)
+            if domainSubsetBounds:
+                bounds = {k: v for k, v in domainSubsetBounds.items() if k in ds}
+                ds = ds.sel(**bounds)
             return [ds]
-    
+
+            
         @staticmethod
-        def OpenMultipleFiles(fileList, concatDim, **kwargs):
-            """Helper: open and combine multiple netCDF files into a single
-            xarray Dataset, concatenated along concatDim."""
+        def OpenMultipleFiles(fileList, concatDim, domainSubsetBounds=None, **kwargs):
             ds = xr.open_mfdataset(
                 fileList, concat_dim=concatDim, combine="nested",
                 decode_timedelta=True, **kwargs)
+            if domainSubsetBounds:
+                bounds = {k: v for k, v in domainSubsetBounds.items() if k in ds}
+                ds = ds.sel(**bounds)
             return [ds]
         
     class DataExporters:
@@ -519,7 +533,7 @@ class InputData_Classes:
         found again later by label alone."""
     
         @staticmethod
-        def SaveH5(dataset, data, file, label, **kwargs):
+        def SaveH5(dataset, data, file, label, compression=None, **kwargs):
             """
             Save data (an already-prepared xr.Dataset) as HDF5 into
             <dataset.dataDirectory>/Postprocessed/<label>/, and record it in the
@@ -531,6 +545,7 @@ class InputData_Classes:
             postprocessedDir = os.path.join(postprocessedRoot, label)
             os.makedirs(postprocessedDir, exist_ok=True)
             manifestPath = os.path.join(postprocessedRoot, "manifest.json")
+            lockPath = manifestPath + ".lock"
         
             sourceFile = dataset.fileList[file]
             number = os.path.splitext(os.path.basename(sourceFile))[0].split("_")[-1]
@@ -540,14 +555,23 @@ class InputData_Classes:
             with h5py.File(outputPath, "w") as f:
                 for name, da in data.data_vars.items():
                     [values] = InputData_Classes.DataExporters.ToH5Compatible(da.values)
-                    f.create_dataset(name, data=values, **kwargs)
+                    comp = compression if values.ndim > 0 else None
+                    f.create_dataset(name, data=values, compression=comp, **kwargs)
                 for name, coord in data.coords.items():
                     [values] = InputData_Classes.DataExporters.ToH5Compatible(coord.values)
-                    f.create_dataset(name, data=values, **kwargs)
+                    comp = compression if values.ndim > 0 else None
+                    f.create_dataset(name, data=values, compression=comp, **kwargs)
         
-            [manifest] = InputData_Classes.DataExporters.LoadManifest(manifestPath)
-            manifest.setdefault(label, {})[str(file)] = os.path.join(label, outputFile)
-            InputData_Classes.DataExporters.SaveManifest(manifestPath, manifest)
+            # --- critical section: only one process at a time updates manifest.json ---
+            with open(lockPath, "w") as lockFile:
+                fcntl.flock(lockFile, fcntl.LOCK_EX)
+                try:
+                    manifest = {} if not os.path.exists(manifestPath)\
+                    else json.load(open(manifestPath))
+                    manifest.setdefault(label, {})[str(file)] = os.path.join(label, outputFile)
+                    InputData_Classes.DataExporters.SaveManifest(manifestPath, manifest)
+                finally:
+                    fcntl.flock(lockFile, fcntl.LOCK_UN)
         
             return [outputPath]
         
@@ -565,39 +589,47 @@ class InputData_Classes:
             elif np.issubdtype(values.dtype, np.datetime64):
                 values = values.astype("datetime64[ns]").astype(np.int64)
             return [values]
-        
+                        
         @staticmethod
-        def LoadH5(dataset, label, file=None):
+        def LoadH5(dataset, label, file=0):
             """
-            Read back HDF5 file(s) previously saved via SaveH5 under this label,
-            using the shared Postprocessed/manifest.json to find them (no
-            path/filename needed). file=None loads every saved file for this label
-            (dict keyed by file index); an int loads just that one (dict of
-            {varName: array}).
+            Read back HDF5 file(s) saved via SaveH5 under this label.
+            file : int -> {varName: array}
+            file : list/tuple of int -> {fileIndex: {varName: array}}
+            No "load everything" option -- use IterateH5 to stream files instead.
             """
             postprocessedRoot = os.path.join(dataset.dataDirectory, "Postprocessed")
             manifestPath = os.path.join(postprocessedRoot, "manifest.json")
             [manifest] = InputData_Classes.DataExporters.LoadManifest(manifestPath)
             labelEntries = manifest.get(label, {})
         
-            if file is not None:
+            if isinstance(file, int):
                 outputPath = os.path.join(postprocessedRoot, labelEntries[str(file)])
                 [data] = InputData_Classes.DataExporters.ReadH5File(outputPath)
                 return [data]
         
-            result = {}
-            for key, relPath in sorted(labelEntries.items(), key=lambda kv: int(kv[0])):
-                [result[int(key)]] = InputData_Classes.DataExporters.ReadH5File(
-                    os.path.join(postprocessedRoot, relPath))
-            return [result]
+            if isinstance(file, (list, tuple)):
+                result = {}
+                for f in file:
+                    outputPath = os.path.join(postprocessedRoot, labelEntries[str(f)])
+                    [result[f]] = InputData_Classes.DataExporters.ReadH5File(outputPath)
+                return [result]
         
+            raise TypeError(f"file must be int or list/tuple of int, got {type(file).__name__}")
+
         @staticmethod
         def LoadManifest(manifestPath):
             """Helper: load manifest.json, or an empty dict if it doesn't exist yet."""
             if not os.path.exists(manifestPath):
                 return [{}]
-            with open(manifestPath, "r") as f:
-                return [json.load(f)]
+            lockPath = manifestPath + ".lock"
+            with open(lockPath, "w") as lockFile:
+                fcntl.flock(lockFile, fcntl.LOCK_SH)
+                try:
+                    with open(manifestPath, "r") as f:
+                        return [json.load(f)]
+                finally:
+                    fcntl.flock(lockFile, fcntl.LOCK_UN)
         
         @staticmethod
         def SaveManifest(manifestPath, manifest):
@@ -629,7 +661,8 @@ class InputData_Classes:
 # DatabaseManager\
 # =OutputData_Classes.DatabaseManager_Class(classDirectory=classDirectory,
 #                                           inputDirectory="../../Input/", outputDirectory="../../Output/",
-#                                           verbose=True)
+#                                           verbose=False)
 
-# InputData = InputData_Classes.Model_InputData_Class(pathResolverKwargs={"inputDirectory": DatabaseManager.inputDirectory,
-#                                                                         "simulationLabel": "1"})
+# InputData = InputData_Classes.Model_InputData_Class(pathResolverKwargs={"inputDirectory": DatabaseManager.inputDirectory, 
+#                                                                         "simulationLabel": "1"},applyDomainSubset=True)
+
