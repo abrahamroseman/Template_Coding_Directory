@@ -199,8 +199,8 @@ class InputData_Classes:
                                                        **kwargs)[0])
             dataset.SaveH5 = lambda data, file, label, **kwargs: (
                 InputData_Classes.DataExporters.SaveH5(dataset, data, file, label, **kwargs))
-            dataset.LoadH5 = lambda label, file=0: (
-                InputData_Classes.DataExporters.LoadH5(dataset, label, file)[0])
+            dataset.LoadH5 = lambda label, file=0, varNames=None: (
+                InputData_Classes.DataExporters.LoadH5(dataset, label, file, varNames)[0])
             return [dataset]
 
         # ============================================================
@@ -591,12 +591,25 @@ class InputData_Classes:
             return [values]
                         
         @staticmethod
-        def LoadH5(dataset, label, file=0):
+        def ReadH5File(path, varNames=None):
+            """Helper: read one HDF5 file into a dict of {name: array}.
+            varNames, if given, restricts which datasets are actually read."""
+            data = {}
+            with h5py.File(path, "r") as f:
+                keys = varNames if varNames is not None else list(f.keys())
+                for name in keys:
+                    data[name] = f[name][()]
+            return [data]
+        
+        @staticmethod
+        def LoadH5(dataset, label, file=0, varNames=None):
             """
             Read back HDF5 file(s) saved via SaveH5 under this label.
             file : int -> {varName: array}
             file : list/tuple of int -> {fileIndex: {varName: array}}
-            No "load everything" option -- use IterateH5 to stream files instead.
+            varNames : optional list -- only read these variables instead of every
+                       dataset in the file (saves I/O when you only need a few).
+            No "load everything" option for file -- use IterateH5 to stream files instead.
             """
             postprocessedRoot = os.path.join(dataset.dataDirectory, "Postprocessed")
             manifestPath = os.path.join(postprocessedRoot, "manifest.json")
@@ -605,14 +618,14 @@ class InputData_Classes:
         
             if isinstance(file, int):
                 outputPath = os.path.join(postprocessedRoot, labelEntries[str(file)])
-                [data] = InputData_Classes.DataExporters.ReadH5File(outputPath)
+                [data] = InputData_Classes.DataExporters.ReadH5File(outputPath, varNames)
                 return [data]
         
             if isinstance(file, (list, tuple)):
                 result = {}
                 for f in file:
                     outputPath = os.path.join(postprocessedRoot, labelEntries[str(f)])
-                    [result[f]] = InputData_Classes.DataExporters.ReadH5File(outputPath)
+                    [result[f]] = InputData_Classes.DataExporters.ReadH5File(outputPath, varNames)
                 return [result]
         
             raise TypeError(f"file must be int or list/tuple of int, got {type(file).__name__}")
@@ -636,15 +649,6 @@ class InputData_Classes:
             """Helper: write manifest.json."""
             with open(manifestPath, "w") as f:
                 json.dump(manifest, f, indent=2)
-        
-        @staticmethod
-        def ReadH5File(path):
-            """Helper: read one HDF5 file into a dict of {name: array}."""
-            data = {}
-            with h5py.File(path, "r") as f:
-                for name in f:
-                    data[name] = f[name][()]
-            return [data]
 
 # #--------------------------------------------------
 # #Example Loading
