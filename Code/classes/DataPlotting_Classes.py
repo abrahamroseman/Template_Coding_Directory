@@ -694,7 +694,7 @@ class DataPlotting_Classes:
             Apply scientific notation with mantissas rounded to a fixed number of decimals.
             """
             for axis in axes:
-                formatter = RoundedScalarFormatter(
+                formatter = DataPlotting_Classes.Functions.RoundedScalarFormatter(
                     decimals=decimals,
                     useMathText=use_math_text,
                     powerlimits=power_limits,
@@ -927,6 +927,7 @@ class DataPlotting_Classes:
 
 # In[ ]:
 
+
 # Animation_Class
 # ============================================================
 
@@ -1044,3 +1045,4 @@ class Animation_Class:
                     os.remove(tmp)
                 except Exception as e:
                     print(f"Warning: could not remove temp file {tmp}: {e}")
+
