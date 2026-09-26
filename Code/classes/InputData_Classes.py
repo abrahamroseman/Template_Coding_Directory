@@ -73,6 +73,7 @@ class InputData_Classes:
             self.timeCoord = timeCoord
             self.applyDomainSubset = applyDomainSubset
             self.verbose = verbose
+            self.pathResolverKwargs = pathResolverKwargs or {}
 
             for key, value in self.metaData.items():
                 setattr(self, key, value)
@@ -361,8 +362,11 @@ class InputData_Classes:
               1. userInitialTimeLT, passed explicitly by the caller — for
                  models/files that don't carry this info at all.
               2. config["initialTimeLT"], a literal hardcoded by the resolver.
-              3. config["initialTimeAttrs"] = {"hour": attrName, "minute": attrName},
-                 read from the first file's global attributes (e.g. CM1).
+              3. config["initialTimeAttrs"] = {"hour": attrName, "minute": attrName,
+                 "UTC_offset": hoursOffsetFromUTC (optional, default 0)},
+                 read from the first file's global attributes (e.g. CM1). The file's
+                 hour/minute is assumed to be UTC; UTC_offset converts it to local
+                 time (e.g. -5 for EST).
             Needs gridSpacing.dtime to build timeHoursLT; if that's missing
             (e.g. only one timestep), returns (initialTimeLT, None).
             """
@@ -375,13 +379,14 @@ class InputData_Classes:
                 with xr.open_dataset(fileList[0], decode_timedelta=True) as ds:
                     hour = ds.attrs.get(initialTimeAttrs.get("hour"), 0)
                     minute = ds.attrs.get(initialTimeAttrs.get("minute"), 0)
-                initialTimeLT = hour + minute / 60
+                utcOffset = initialTimeAttrs.get("UTC_offset", 0)
+                initialTimeLT = (hour + minute / 60 + utcOffset) % 24
             else:
                 return [None, None]
-
+        
             if not hasattr(gridSpacing, "dtime"):
                 return [initialTimeLT, None]
-
+        
             timeHoursLT = np.arange(Ntime) * (gridSpacing.dtime / 3600) + initialTimeLT
             return [initialTimeLT, timeHoursLT]
 
@@ -426,28 +431,31 @@ class InputData_Classes:
         """
 
         @staticmethod
-        def CloudModelOne(inputDirectory, simulationLabel):
-            simulationFolders = {"1": "Simulation_1", "2": "Simulation_2"}
+        def CloudModelOne(inputDirectory, simulationLabel, **overrides):
+            simulationFolders = {"Test": "Simulation_Test","1": "Simulation_1", "2": "Simulation_2"}
             folderName = simulationFolders[str(simulationLabel)]
             dataDirectory = os.path.join(inputDirectory, "Model", folderName)
-
+        
             dataTypeConfig = {
                 "eulerianData": {
                     "dataDirectory": dataDirectory,
                     "filePattern": "cm1out_*.nc",
                     "excludePatterns": ("cm1out_pdata*.nc", "cm1out_stats*.nc"),
                     "coordNames": ("time", "zf", "zh", "yf", "yh", "xf", "xh"),
-                    "initialTimeAttrs": {"hour": "hour", "minute": "minute"},
+                    "initialTimeAttrs": {"hour": "hour", "minute": "minute", "UTC_offset": -5},
                     "domainSubsetBounds": {"xh": slice(20, 280),}, #... etc #in same units of the coords
-
+        
                 },
                 "lagrangianData": {
                     "dataDirectory": dataDirectory,
                     "filePattern": "cm1out_pdata.nc",
                     "coordNames": ("time",),
-                    "initialTimeAttrs": {"hour": "hour", "minute": "minute"},
+                    "initialTimeAttrs": {"hour": "hour", "minute": "minute", "UTC_offset": -5},
                 },
             }
+        
+            dataTypeConfig["eulerianData"].update(overrides)   # <-- this line is the actual fix
+        
             return [dataTypeConfig]
 
         # Add more resolvers here as needed, e.g.:
