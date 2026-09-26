@@ -200,7 +200,7 @@ class InputData_Classes:
             dataset.SaveH5 = lambda data, file, label, **kwargs: (
                 InputData_Classes.DataExporters.SaveH5(dataset, data, file, label, **kwargs))
             dataset.LoadH5 = lambda label, file=0, varNames=None: (
-                InputData_Classes.DataExporters.LoadH5(dataset, label, file, varNames)[0])
+                InputData_Classes.DataExporters.LoadH5(dataset, label, file, varNames))
             return [dataset]
 
         # ============================================================
@@ -533,7 +533,7 @@ class InputData_Classes:
         found again later by label alone."""
     
         @staticmethod
-        def SaveH5(dataset, data, file, label, compression=None, **kwargs):
+        def SaveH5(dataset, data, file, label, compression=None, verbose=False, **kwargs):
             """
             Save data (an already-prepared xr.Dataset) as HDF5 into
             <dataset.dataDirectory>/Postprocessed/<label>/, and record it in the
@@ -572,6 +572,9 @@ class InputData_Classes:
                     InputData_Classes.DataExporters.SaveManifest(manifestPath, manifest)
                 finally:
                     fcntl.flock(lockFile, fcntl.LOCK_UN)
+
+            if verbose:
+                print(f"Saved: {outputPath}")
         
             return [outputPath]
         
@@ -605,8 +608,8 @@ class InputData_Classes:
         def LoadH5(dataset, label, file=0, varNames=None):
             """
             Read back HDF5 file(s) saved via SaveH5 under this label.
-            file : int -> {varName: array}
-            file : list/tuple of int -> {fileIndex: {varName: array}}
+            file : int -> ({varName: array}, filePath)
+            file : list/tuple of int -> ({fileIndex: {varName: array}}, {fileIndex: filePath})
             varNames : optional list -- only read these variables instead of every
                        dataset in the file (saves I/O when you only need a few).
             No "load everything" option for file -- use IterateH5 to stream files instead.
@@ -619,14 +622,16 @@ class InputData_Classes:
             if isinstance(file, int):
                 outputPath = os.path.join(postprocessedRoot, labelEntries[str(file)])
                 [data] = InputData_Classes.DataExporters.ReadH5File(outputPath, varNames)
-                return [data]
+                return [data, outputPath]
         
             if isinstance(file, (list, tuple)):
                 result = {}
+                paths = {}
                 for f in file:
                     outputPath = os.path.join(postprocessedRoot, labelEntries[str(f)])
                     [result[f]] = InputData_Classes.DataExporters.ReadH5File(outputPath, varNames)
-                return [result]
+                    paths[f] = outputPath
+                return [result, paths]
         
             raise TypeError(f"file must be int or list/tuple of int, got {type(file).__name__}")
 

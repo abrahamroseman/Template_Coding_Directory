@@ -70,7 +70,8 @@ class OutputData_Classes:
                        subFolderName=None, subDataName=None,
                        fileName=None, subFileName=None,
                        dtype=None, makeDirectory=True,
-                       fileType="h5"):
+                       fileType="h5",
+                       verbose=False):
             """
             Save outputDictionary to:
                 self.outputDirectory / folderName [/ subFolderName] / 
@@ -92,12 +93,13 @@ class OutputData_Classes:
                 pathParts.append(subDataName)
             fileDirectory = os.path.join(*pathParts)
             filePath = os.path.join(fileDirectory, f"{actualFileName}{extension}")
-
+        
             saveFunction(
                 outputDictionary=outputDictionary,
                 filePath=filePath,
                 dtype=dtype,
                 makeDirs=makeDirectory,
+                verbose=verbose,
                 attrs={
                     "folderName": folderName,
                     "subFolderName": subFolderName,
@@ -382,7 +384,7 @@ class OutputData_Classes:
     class Functions:
             
         @staticmethod
-        def SaveOutput_H5(outputDictionary, filePath, dtype=None, makeDirs=True, attrs=None):
+        def SaveOutput_H5(outputDictionary, filePath, dtype=None, makeDirs=True, attrs=None, verbose=False):
             """
             Generic HDF5 saving function. Saves outputDictionary (a dict of
             {varName: array}) to filePath. If outputDictionary is not a dict,
@@ -415,10 +417,10 @@ class OutputData_Classes:
         
                 if attrs:
                     for key, value in attrs.items():
-                        # h5py attrs can't store None -- use empty string as the "absent" marker
                         f.attrs[key] = value if value is not None else ""
         
-            print(f"Saved output file: {filePath}\n")
+            if verbose:
+                print(f"Saved output file: {filePath}\n")
             
         @staticmethod
         def LoadOutput_H5(filePath, dtype=None, verbose=True,
@@ -465,7 +467,7 @@ class OutputData_Classes:
             return [attrDictionary]
                 
         @staticmethod
-        def SaveOutput_Pickle(outputDictionary, filePath, dtype=None, makeDirs=True, attrs=None):
+        def SaveOutput_Pickle(outputDictionary, filePath, dtype=None, makeDirs=True, attrs=None, verbose=False):
             """
             attrs, if given, is stored under a reserved "_attrs" key alongside the data.
             """
@@ -484,7 +486,8 @@ class OutputData_Classes:
             with open(filePath, 'wb') as file:
                 pickle.dump(dataToSave, file)
         
-            print(f"Saved output file: {filePath}\n")
+            if verbose:
+                print(f"Saved output file: {filePath}\n")
                 
         @staticmethod
         def LoadOutput_Pickle(filePath, verbose=True):
