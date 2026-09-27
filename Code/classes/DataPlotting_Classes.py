@@ -262,6 +262,51 @@ class DataPlotting_Classes:
             DataPlotting_Classes.UltimatePlotting_Class.ApplyFontStyles(ax, fontStyles)
     
             return [fig, ax]
+        
+        @staticmethod
+        def PlotStack(ax=None, figSize=None,
+                      xData=None, yData=None, labels=None,
+                      title=None, xLabel=None, yLabel=None,
+                      xTicks=None, yTicks=None, xLim=None, yLim=None,
+                      fontScale=1.0, showLegend=None,
+                      **stackKwargs):
+            """
+            Wraps ax.stackplot with the same styling/legend/font conventions as
+            PlotLine.
+            yData : 2D array (nSeries, nPoints), or list of 1D arrays -- one row
+                per stacked series, matching matplotlib's stackplot convention.
+            labels : list of labels, one per series in yData, same order.
+            """
+            if ax is None:
+                fig, ax = plt.subplots(figsize=figSize)
+            else:
+                fig = ax.figure
+        
+            ax.stackplot(xData, yData, labels=labels, **stackKwargs)
+        
+            if title is not None:
+                ax.set_title(title)
+            if xLabel is not None:
+                ax.set_xlabel(xLabel)
+            if yLabel is not None:
+                ax.set_ylabel(yLabel)
+            if xTicks is not None:
+                ax.set_xticks(xTicks)
+            if yTicks is not None:
+                ax.set_yticks(yTicks)
+            if xLim is not None:
+                ax.set_xlim(xLim)
+            if yLim is not None:
+                ax.set_ylim(yLim)
+        
+            anyLabels = labels is not None and any(l and not str(l).startswith("_") for l in labels)
+            if showLegend or (showLegend is None and anyLabels):
+                ax.legend()
+        
+            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale)
+            DataPlotting_Classes.UltimatePlotting_Class.ApplyFontStyles(ax, fontStyles)
+        
+            return [fig, ax]
 
         def PlotContour(ax=None,cax=None,figSize=None, #figure and axis
                         xData=None,yData=None,zData=None, #data
@@ -875,12 +920,12 @@ class DataPlotting_Classes:
     
             @staticmethod
             def Save(fig, filename, extension="jpg", dpi=150,
-                     verbose=False):
+                     verbose=False,closefig=False):
                 # only append extension if filename doesn't already end with one
                 if not filename.lower().endswith(f".{extension.lower()}"):
                     filename = f"{filename}.{extension}"
                 fig.savefig(filename, dpi=dpi)
-                plt.close(fig)
+                if closefig: plt.close(fig)
                 
                 if verbose:
                     print(f"Saved image: {filename}")

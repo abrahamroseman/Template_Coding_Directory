@@ -663,6 +663,13 @@ class InputData_Classes:
             with open(manifestPath, "w") as f:
                 json.dump(manifest, f, indent=2)
 
+    class UtilityFunctions:
+    
+        @staticmethod
+        def CalculateTimeIndex(timeHoursLT, time_hr):
+            return int(np.abs(timeHoursLT - time_hr).argmin())
+
+
 # #--------------------------------------------------
 # #Example Loading
 # #--------------------------------------------------
