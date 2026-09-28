@@ -554,9 +554,12 @@ class InputData_Classes:
             os.makedirs(postprocessedDir, exist_ok=True)
             manifestPath = os.path.join(postprocessedRoot, "manifest.json")
             lockPath = manifestPath + ".lock"
-        
-            sourceFile = dataset.fileList[file]
-            number = os.path.splitext(os.path.basename(sourceFile))[0].split("_")[-1]
+
+            if dataset.isDataTimestepByTimestep:
+                sourceFile = dataset.fileList[file]
+                number = os.path.splitext(os.path.basename(sourceFile))[0].split("_")[-1]
+            else:
+                number = f"{file:06d}"
             outputFile = f"cm1_{number}_{label}.h5"
             outputPath = os.path.join(postprocessedDir, outputFile)
         
@@ -668,6 +671,14 @@ class InputData_Classes:
         @staticmethod
         def CalculateTimeIndex(timeHoursLT, time_hr):
             return int(np.abs(timeHoursLT - time_hr).argmin())
+
+        @staticmethod
+        def ConvertLagrangianSpatialVariablesToIndex(z,y,x,eulerianData):
+            eulerianData = InputData.eulerianData
+            zf=eulerianData.zf*1e3; Z=np.clip(np.searchsorted(zf,z)-1,0,None).astype(np.uint16)
+            yf=eulerianData.yf*1e3; Y=np.clip(np.searchsorted(yf,y)-1,0,None).astype(np.uint16) 
+            xf=eulerianData.xf*1e3; X=np.clip(np.searchsorted(xf,x)-1,0,None).astype(np.uint16)
+            return [Z,Y,X]
 
 
 # #--------------------------------------------------
