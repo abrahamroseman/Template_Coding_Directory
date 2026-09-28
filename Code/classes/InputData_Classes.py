@@ -15,7 +15,7 @@
 # from InputData_Classes import InputData_Classes
 
 
-# In[45]:
+# In[10]:
 
 
 # InputData_Classes
@@ -243,9 +243,7 @@ class InputData_Classes:
             """
             extracted = {}
             with xr.open_dataset(fileList[0], decode_timedelta=True) as ds:
-                if domainSubsetBounds:
-                    bounds = {k: v for k, v in domainSubsetBounds.items() if k in ds}
-                    ds = ds.sel(**bounds)
+                ds = InputData_Classes.DataOpeners.ApplyDomainSubset(ds, domainSubsetBounds)
                 for k in coordNames:
                     if k in ds:
                         extracted[k] = ds[k].values
@@ -484,6 +482,49 @@ class InputData_Classes:
     class DataOpeners:
         """Namespace of stateless functions for opening netCDF file(s) into
         an xarray Dataset, given a file list and optional file-index selection."""
+
+        @staticmethod
+        def ApplyDomainSubset(ds, domainSubsetBounds):
+            """
+            Crop ds to domainSubsetBounds ({dim: slice(lo, hi)}, inclusive, in the
+            coordinate's own units).
+
+            Staggered grids are cropped together: bounds on a cell-center dimension
+            (xh/yh/zh) also crop the matching face dimension (xf/yf/zf) to the N+1
+            faces bounding those cells, and bounds on a face dimension crop the
+            matching centers to the cells between those faces. If both are given
+            explicitly, each is applied as written.
+            """
+            if not domainSubsetBounds:
+                return ds
+
+            def SelectedIndices(dim, bound):
+                values = ds[dim].values
+                lo = -np.inf if bound.start is None else bound.start
+                hi = np.inf if bound.stop is None else bound.stop
+                idx = np.flatnonzero((values >= lo) & (values <= hi))
+                if idx.size == 0:
+                    raise ValueError(f"domainSubsetBounds for '{dim}' ({bound}) selects nothing.")
+                return idx[0], idx[-1]
+
+            indexers = {}
+            for dim, bound in domainSubsetBounds.items():
+                if dim not in ds.dims:
+                    continue
+                [first, last] = SelectedIndices(dim, bound)
+                indexers[dim] = slice(first, last + 1)
+
+                pair = {'h': 'f', 'f': 'h'}.get(dim[-1])
+                other = dim[:-1] + pair if pair else None
+                if other is None or other in domainSubsetBounds or other not in ds.dims:
+                    continue                                   # no partner, or user set it explicitly
+
+                nFaces, nCenters = (ds.sizes[other], ds.sizes[dim]) if dim.endswith('h') else (ds.sizes[dim], ds.sizes[other])
+                if nFaces != nCenters + 1:
+                    raise ValueError(f"'{dim}' and '{other}' aren't a staggered pair (expected N+1 faces, got {nFaces} vs {nCenters}).")
+
+                indexers[other] = slice(first, last + 2) if dim.endswith('h') else slice(first, last)
+            return ds.isel(indexers)
     
         @staticmethod
         def OpenData(fileList, concatDim="time", file=None, domainSubsetBounds=None, **kwargs):
@@ -518,22 +559,17 @@ class InputData_Classes:
         @staticmethod
         def OpenSingleFile(filePath, domainSubsetBounds=None, **kwargs):
             ds = xr.open_dataset(filePath, decode_timedelta=True, **kwargs)
-            if domainSubsetBounds:
-                bounds = {k: v for k, v in domainSubsetBounds.items() if k in ds}
-                ds = ds.sel(**bounds)
+            ds = InputData_Classes.DataOpeners.ApplyDomainSubset(ds, domainSubsetBounds)
             return [ds]
 
-            
         @staticmethod
         def OpenMultipleFiles(fileList, concatDim, domainSubsetBounds=None, **kwargs):
             ds = xr.open_mfdataset(
                 fileList, concat_dim=concatDim, combine="nested",
                 decode_timedelta=True, **kwargs)
-            if domainSubsetBounds:
-                bounds = {k: v for k, v in domainSubsetBounds.items() if k in ds}
-                ds = ds.sel(**bounds)
+            ds = InputData_Classes.DataOpeners.ApplyDomainSubset(ds, domainSubsetBounds)
             return [ds]
-        
+            
     class DataExporters:
         """Namespace of stateless functions for exporting an already-prepared
         xarray Dataset to disk (e.g. as HDF5), tracked via a single shared JSON
@@ -673,13 +709,13 @@ class InputData_Classes:
             return int(np.abs(timeHoursLT - time_hr).argmin())
 
         @staticmethod
-        def ConvertLagrangianSpatialVariablesToIndex(z,y,x,eulerianData):
-            eulerianData = InputData.eulerianData
-            zf=eulerianData.zf*1e3; Z=np.clip(np.searchsorted(zf,z)-1,0,None).astype(np.uint16)
-            yf=eulerianData.yf*1e3; Y=np.clip(np.searchsorted(yf,y)-1,0,None).astype(np.uint16) 
-            xf=eulerianData.xf*1e3; X=np.clip(np.searchsorted(xf,x)-1,0,None).astype(np.uint16)
-            return [Z,Y,X]
-
+        def ConvertLagrangianSpatialVariablesToIndex(z,y,x,eulerianData,invalid=-100):
+            zf=eulerianData.zf*1e3; Z=np.searchsorted(zf,z)-1
+            yf=eulerianData.yf*1e3; Y=np.searchsorted(yf,y)-1
+            xf=eulerianData.xf*1e3; X=np.searchsorted(xf,x)-1
+            VALID = (Z>=0)&(Z<eulerianData.Nzh)&(Y>=0)&(Y<eulerianData.Nyh)&(X>=0)&(X<eulerianData.Nxh)
+            [Z,Y,X] = [np.where(VALID,idx,invalid).astype(np.int16) for idx in (Z,Y,X)]
+            return [Z,Y,X,VALID]
 
 # #--------------------------------------------------
 # #Example Loading
