@@ -308,6 +308,56 @@ class DataPlotting_Classes:
         
             return [fig, ax]
 
+        @staticmethod
+        def PlotHistogram(ax=None, figSize=None,
+                          data=None, bins=None, label=None,
+                          density=False, histtype='step',
+                          title=None, xLabel=None, yLabel=None,
+                          xTicks=None, yTicks=None, xLim=None, yLim=None,
+                          fontScale=1.0, showLegend=None,
+                          **histKwargs):
+            """
+            Wraps ax.hist with the same styling/legend/font conventions as PlotLine.
+            data : 1D array of values (NaNs should be removed beforehand).
+            bins : int or array of bin edges. Pass an array of edges when overlaying
+                several histograms so they all share the same bins.
+            density : True normalizes so the histogram integrates to 1 (use this to
+                compare shapes between groups with different sample sizes).
+            histtype : 'step' (outline only, best for overlays), 'bar', or 'stepfilled'.
+            Extra keyword arguments (color, lw, alpha, ls, zorder, ...) go to ax.hist.
+            """
+            if ax is None:
+                fig, ax = plt.subplots(figsize=figSize)
+            else:
+                fig = ax.figure
+
+            ax.hist(data, bins=bins, density=density, histtype=histtype, label=label, **histKwargs)
+
+            if title is not None:
+                ax.set_title(title)
+            if xLabel is not None:
+                ax.set_xlabel(xLabel)
+            if yLabel is not None:
+                ax.set_ylabel(yLabel)
+            if xTicks is not None:
+                ax.set_xticks(xTicks)
+            if yTicks is not None:
+                ax.set_yticks(yTicks)
+            if xLim is not None:
+                ax.set_xlim(xLim)
+            if yLim is not None:
+                ax.set_ylim(yLim)
+
+            _, legendLabels = ax.get_legend_handles_labels()
+            anyLabels = any(l and not l.startswith("_") for l in legendLabels)
+            if showLegend or (showLegend is None and anyLabels):
+                ax.legend()
+
+            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale)
+            DataPlotting_Classes.UltimatePlotting_Class.ApplyFontStyles(ax, fontStyles)
+
+            return [fig, ax]
+
         def PlotContour(ax=None,cax=None,figSize=None, #figure and axis
                         xData=None,yData=None,zData=None, #data
                         plotType='contourf', #plotting function
