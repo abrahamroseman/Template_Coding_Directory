@@ -784,6 +784,7 @@ class DataPlotting_Classes:
     # Functions
     # ============================================================
     class Functions:
+        @staticmethod
         def ApplyScientificNotation_axes(axes, dimension='x', use_math_text=True, power_limits=(-1, 1), decimals=2, scientific=True):
             """
             Apply scientific notation with mantissas rounded to a fixed number of decimals.
@@ -811,10 +812,12 @@ class DataPlotting_Classes:
         
             def _set_format(self):
                 self.format = f"%.{self.decimals}f"
-        
+
+        @staticmethod
         def ApplyScientificNotation_colorbars(cbars, decimals=2):
             for cbar in cbars:
-                fmt = FixedDecimalScalarFormatter(decimals=decimals, useMathText=True)
+                fmt = DataPlotting_Classes.Functions.FixedDecimalScalarFormatter(decimals=decimals,
+                                                                                 useMathText=True)
                 fmt.set_powerlimits((-3, 3))   # enforce sci-notation range
                 
                 cbar.formatter = fmt
@@ -838,6 +841,7 @@ class DataPlotting_Classes:
                 self.format = fmt
                 self._useOffset = True   # keep exponent in offsetText
 
+        @staticmethod
         def MatchLimitsBetweenAxes(axes, dim='x'):
             """
             Match axis limits and ticks across multiple axes.
@@ -880,6 +884,27 @@ class DataPlotting_Classes:
                     ax.set_yticks(referenceTicks)
         
             return referenceLim
+
+        @staticmethod
+        def Test():
+            UltimatePlotting = DataPlotting_Classes.UltimatePlotting_Class
+            F = DataPlotting_Classes.Functions
+
+            x = np.linspace(0, 1e5, 100)
+            y = np.linspace(0, 5e4, 80)
+            X, Y = np.meshgrid(x, y)
+            Z = 1e6 * np.sin(X / 1e4) * np.cos(Y / 1e4)
+
+            [fig, axes, caxes] = UltimatePlotting.MakeAlignedGridFigure(nRows=1, nCols=1, 
+                                                                        hasCbar=[[True]], 
+                                                                        figSize=(7, 5))
+            [_, ax, cbar] = UltimatePlotting.PlotContour(ax=axes[0, 0], cax=caxes[0, 0],
+                                           xData=x, yData=y, zData=Z, cmap="RdBu_r")
+
+            F.ApplyScientificNotation_axes([ax], dimension='xy', decimals=2)
+            F.ApplyScientificNotation_colorbars([cbar], decimals=2)
+
+            return fig
 
     # FigureSavingFunctions
     # ============================================================
