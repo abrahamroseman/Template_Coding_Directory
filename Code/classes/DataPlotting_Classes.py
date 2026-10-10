@@ -67,6 +67,7 @@ class DataPlotting_Classes:
                 "cbarLabel":  {"fontsize": 12 * scale, "fontfamily": "sans-serif"},
                 "cbarTick":   {"fontsize": 10 * scale, "fontfamily": "sans-serif"},
                 "suptitle":   {"fontsize": 16 * scale, "fontfamily": "sans-serif", "fontweight": "bold"},
+                "offset":     {"fontsize": 10 * scale, "fontfamily": "sans-serif"},
             }
             return [fontStyles]
     
@@ -77,12 +78,15 @@ class DataPlotting_Classes:
             axis labels, title, and legend (if present).
             """
             ax.tick_params(axis="both", labelsize=fontStyles["tick"]["fontsize"])
+            ax.xaxis.get_offset_text().set_fontsize(fontStyles["offset"]["fontsize"])
+            ax.yaxis.get_offset_text().set_fontsize(fontStyles["offset"]["fontsize"])
             ax.xaxis.label.set_fontsize(fontStyles["label"]["fontsize"])
             ax.yaxis.label.set_fontsize(fontStyles["label"]["fontsize"])
             ax.xaxis.label.set_fontfamily(fontStyles["label"]["fontfamily"])
             ax.yaxis.label.set_fontfamily(fontStyles["label"]["fontfamily"])
             ax.title.set_fontsize(fontStyles["title"]["fontsize"])
             ax.title.set_fontweight(fontStyles["title"]["fontweight"])
+
     
             legend = ax.get_legend()
             if legend is not None:
@@ -95,6 +99,8 @@ class DataPlotting_Classes:
             tick labels and its label text (if set).
             """
             cbar.ax.tick_params(labelsize=fontStyles["cbarTick"]["fontsize"])
+            cbar.ax.yaxis.get_offset_text().set_fontsize(fontStyles["offset"]["fontsize"])
+            cbar.ax.xaxis.get_offset_text().set_fontsize(fontStyles["offset"]["fontsize"])
             if cbar.ax.yaxis.label.get_text():
                 cbar.ax.yaxis.label.set_fontsize(fontStyles["cbarLabel"]["fontsize"])
                 cbar.ax.yaxis.label.set_fontfamily(fontStyles["cbarLabel"]["fontfamily"])
