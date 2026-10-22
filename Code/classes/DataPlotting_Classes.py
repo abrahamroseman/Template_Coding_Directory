@@ -1001,11 +1001,17 @@ class DataPlotting_Classes:
     
             @staticmethod
             def Save(fig, filename, extension="jpg", dpi=150,
-                     verbose=False,closefig=False):
+                     verbose=False, closefig=False,
+                     tight=True, pad_inches=0.1):
                 # only append extension if filename doesn't already end with one
                 if not filename.lower().endswith(f".{extension.lower()}"):
                     filename = f"{filename}.{extension}"
-                fig.savefig(filename, dpi=dpi)
+    
+                # tight=True crops extra white space around the figure edges
+                if tight:
+                    fig.savefig(filename, dpi=dpi, bbox_inches='tight', pad_inches=pad_inches)
+                else:
+                    fig.savefig(filename, dpi=dpi)
                 if closefig: plt.close(fig)
                 
                 if verbose:
