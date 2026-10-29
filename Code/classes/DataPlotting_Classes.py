@@ -1153,12 +1153,9 @@ class Animation_Class:
         ffmpeg_params = [
             "-pix_fmt", "yuv420p",
             "-profile:v", "main",
-            "-movflags", "+faststart"
+            "-movflags", "+faststart",
+            "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",   # libx264 needs even width and height; adds at most 1 px
         ]
-    
-        # # If we didn't resize, add the padding filter to prevent the BrokenPipeError
-        # if resize == False:
-        #     ffmpeg_params.extend(["-vf", "pad='iw:ceil(ih/2)*2'"])
     
         # --- Export to MP4 ---
         clip.write_videofile(
