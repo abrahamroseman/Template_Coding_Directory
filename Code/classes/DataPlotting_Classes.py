@@ -49,7 +49,7 @@ class DataPlotting_Classes:
         #LinePlot and ContourPlot Helper Functions
         ##################################################################################################################################
         @staticmethod
-        def GetFontStyles(scale=1.0):
+        def GetFontStyles(scale=1.0, elementScales=None):
             """
             Central place defining font family and sizes for every plot
             element. Returns a dictionary keyed by element type. Change
@@ -69,6 +69,11 @@ class DataPlotting_Classes:
                 "suptitle":   {"fontsize": 16 * scale, "fontfamily": "sans-serif", "fontweight": "bold"},
                 "offset":     {"fontsize": 10 * scale, "fontfamily": "sans-serif"},
             }
+            #Extra per-element multipliers on top of scale, e.g. {'tick': 1.4, 'label': 1.2}
+            for key, factor in (elementScales or {}).items():
+                if key not in fontStyles:
+                    raise KeyError(f"elementScales key {key!r} not in {list(fontStyles)}")
+                fontStyles[key]["fontsize"] *= factor
             return [fontStyles]
     
         @staticmethod
@@ -229,7 +234,7 @@ class DataPlotting_Classes:
                      xData=[1,2,3], yData=[1,2,3],label=None,
                      title=None, xLabel=None, yLabel=None,
                      xTicks=None,yTicks=None, xLim=None,yLim=None,
-                     fontScale=1.0, showLegend=None,
+                     fontScale=1.0, elementScales=None, showLegend=None,
                      **plotKwargs):
             """
             ...
@@ -264,7 +269,7 @@ class DataPlotting_Classes:
             if showLegend or (showLegend is None and anyLabels):
                 ax.legend()
     
-            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale)
+            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale, elementScales)
             DataPlotting_Classes.UltimatePlotting_Class.ApplyFontStyles(ax, fontStyles)
     
             return [fig, ax]
@@ -274,7 +279,7 @@ class DataPlotting_Classes:
                       xData=None, yData=None, labels=None,
                       title=None, xLabel=None, yLabel=None,
                       xTicks=None, yTicks=None, xLim=None, yLim=None,
-                      fontScale=1.0, showLegend=None,
+                      fontScale=1.0, elementScales=None, showLegend=None,
                       **stackKwargs):
             """
             Wraps ax.stackplot with the same styling/legend/font conventions as
@@ -309,7 +314,7 @@ class DataPlotting_Classes:
             if showLegend or (showLegend is None and anyLabels):
                 ax.legend()
         
-            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale)
+            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale, elementScales)
             DataPlotting_Classes.UltimatePlotting_Class.ApplyFontStyles(ax, fontStyles)
         
             return [fig, ax]
@@ -320,7 +325,7 @@ class DataPlotting_Classes:
                           density=False, histtype='step',
                           title=None, xLabel=None, yLabel=None,
                           xTicks=None, yTicks=None, xLim=None, yLim=None,
-                          fontScale=1.0, showLegend=None,
+                          fontScale=1.0, elementScales=None, showLegend=None,
                           **histKwargs):
             """
             Wraps ax.hist with the same styling/legend/font conventions as PlotLine.
@@ -359,7 +364,7 @@ class DataPlotting_Classes:
             if showLegend or (showLegend is None and anyLabels):
                 ax.legend()
 
-            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale)
+            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale, elementScales)
             DataPlotting_Classes.UltimatePlotting_Class.ApplyFontStyles(ax, fontStyles)
 
             return [fig, ax]
@@ -373,7 +378,7 @@ class DataPlotting_Classes:
                         nLevels=13,nLevelsNeg=None,nLevelsPos=None, #colorbar ticks and limits
                         colorRangeMethod='minmax', useLocalColorRange=False, cbarTicks=None,colorLimits=None, #colorbar ticks and limits, 
                         title=None,xLabel=None,yLabel=None, #labels
-                        fontScale=1.0, **contourKwargs): #other arguments
+                        fontScale=1.0, elementScales=None, **contourKwargs): #other arguments
             
             if plotType not in ('contourf', 'contour', 'pcolormesh'):
                 raise ValueError(f"plotType must be 'contourf', 'contour', or 'pcolormesh', got {plotType!r}")
@@ -460,7 +465,7 @@ class DataPlotting_Classes:
             elif cax is not None:
                 cax.set_visible(False)
             #fonts
-            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale)
+            [fontStyles] = DataPlotting_Classes.UltimatePlotting_Class.GetFontStyles(fontScale, elementScales)
             DataPlotting_Classes.UltimatePlotting_Class.ApplyFontStyles(ax, fontStyles)
             if cbar is not None:
                 DataPlotting_Classes.UltimatePlotting_Class.ApplyColorbarFontStyles(cbar, fontStyles)

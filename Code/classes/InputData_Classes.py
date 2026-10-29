@@ -31,6 +31,8 @@ import numpy as np
 import xarray as xr; import h5py; import json
 import netCDF4
 import fcntl
+import socket
+import uuid
 
 class InputData_Classes:
 
@@ -572,57 +574,49 @@ class InputData_Classes:
             
     class DataExporters:
         """Namespace of stateless functions for exporting an already-prepared
-        xarray Dataset to disk (e.g. as HDF5), tracked via a single shared JSON
-        manifest (Derived/manifest.json) covering every label, so files can be
-        found again later by label alone."""
+        xarray Dataset to disk as HDF5. Each file's path is fixed by its label and file index
+        (<dataDirectory>/Postprocessed/<label>/cm1_<number>_<label>.h5), so files are found from that
+        naming convention alone. A shared JSON manifest (Postprocessed/manifest.json) is also kept as a
+        record of what has been saved, but nothing depends on it being complete."""
     
         @staticmethod
-        def SaveH5(dataset, data, file, label, compression=None, verbose=False, **kwargs):
+        def SaveH5(dataset, data, file, label, compression=None, verbose=False, updateManifest=True, **kwargs):
             """
-            Save data (an already-prepared xr.Dataset) as HDF5 into
-            <dataset.dataDirectory>/Postprocessed/<label>/, and record it in the
-            shared <dataset.dataDirectory>/Postprocessed/manifest.json (structured
-            as {label: {file: relativePath}}), so all saved labels are tracked
-            together in one manifest.
+            Save data (an already-prepared xr.Dataset) as HDF5 into <dataset.dataDirectory>/Postprocessed/<label>/.
+            The file is written under a temporary name and renamed when complete, so a file with the final name
+            always holds complete data (a job killed mid-write leaves only a temporary file).
+            updateManifest: also record the file in the shared manifest.json. Pass False from parallel job arrays
+            and run RebuildManifest once afterwards, so jobs never write the shared file at the same time.
             """
             postprocessedRoot = os.path.join(dataset.dataDirectory, "Postprocessed")
             postprocessedDir = os.path.join(postprocessedRoot, label)
             os.makedirs(postprocessedDir, exist_ok=True)
-            manifestPath = os.path.join(postprocessedRoot, "manifest.json")
-            lockPath = manifestPath + ".lock"
-
-            if dataset.isDataTimestepByTimestep:
-                sourceFile = dataset.fileList[file]
-                number = os.path.splitext(os.path.basename(sourceFile))[0].split("_")[-1]
-            else:
-                number = f"{file:06d}"
-            outputFile = f"cm1_{number}_{label}.h5"
+            [outputFile] = InputData_Classes.DataExporters.GetH5FileName(dataset, label, file)
             outputPath = os.path.join(postprocessedDir, outputFile)
-        
-            with h5py.File(outputPath, "w") as f:
-                for name, da in data.data_vars.items():
-                    [values] = InputData_Classes.DataExporters.ToH5Compatible(da.values)
-                    comp = compression if values.ndim > 0 else None
-                    f.create_dataset(name, data=values, compression=comp, **kwargs)
-                for name, coord in data.coords.items():
-                    [values] = InputData_Classes.DataExporters.ToH5Compatible(coord.values)
-                    comp = compression if values.ndim > 0 else None
-                    f.create_dataset(name, data=values, compression=comp, **kwargs)
-        
-            # --- critical section: only one process at a time updates manifest.json ---
-            with open(lockPath, "w") as lockFile:
-                fcntl.flock(lockFile, fcntl.LOCK_EX)
-                try:
-                    manifest = {} if not os.path.exists(manifestPath)\
-                    else json.load(open(manifestPath))
-                    manifest.setdefault(label, {})[str(file)] = os.path.join(label, outputFile)
-                    InputData_Classes.DataExporters.SaveManifest(manifestPath, manifest)
-                finally:
-                    fcntl.flock(lockFile, fcntl.LOCK_UN)
+
+            #Write to a unique temporary file, then rename it to the final name in one step
+            [tmpPath] = InputData_Classes.DataExporters.GetTemporaryPath(outputPath)
+            try:
+                with h5py.File(tmpPath, "w") as f:
+                    for name, da in data.data_vars.items():
+                        [values] = InputData_Classes.DataExporters.ToH5Compatible(da.values)
+                        comp = compression if values.ndim > 0 else None
+                        f.create_dataset(name, data=values, compression=comp, **kwargs)
+                    for name, coord in data.coords.items():
+                        [values] = InputData_Classes.DataExporters.ToH5Compatible(coord.values)
+                        comp = compression if values.ndim > 0 else None
+                        f.create_dataset(name, data=values, compression=comp, **kwargs)
+                os.replace(tmpPath, outputPath)
+            finally:
+                #Remove the temporary file if anything failed before the rename
+                if os.path.exists(tmpPath):
+                    os.remove(tmpPath)
+
+            if updateManifest:
+                InputData_Classes.DataExporters.AddManifestEntry(dataset, label, file, os.path.join(label, outputFile))
 
             if verbose:
                 print(f"Saved: {outputPath}")
-        
             return [outputPath]
         
         @staticmethod
@@ -654,53 +648,159 @@ class InputData_Classes:
         @staticmethod
         def LoadH5(dataset, label, file=0, varNames=None):
             """
-            Read back HDF5 file(s) saved via SaveH5 under this label.
+            Read back HDF5 file(s) saved via SaveH5 under this label. Paths come from the naming convention, so the
+            shared manifest is not read (no lock contention, and a missing manifest entry cannot break loading).
             file : int -> ({varName: array}, filePath)
             file : list/tuple of int -> ({fileIndex: {varName: array}}, {fileIndex: filePath})
             varNames : optional list -- only read these variables instead of every
                        dataset in the file (saves I/O when you only need a few).
-            No "load everything" option for file -- use IterateH5 to stream files instead.
             """
-            postprocessedRoot = os.path.join(dataset.dataDirectory, "Postprocessed")
-            manifestPath = os.path.join(postprocessedRoot, "manifest.json")
-            [manifest] = InputData_Classes.DataExporters.LoadManifest(manifestPath)
-            labelEntries = manifest.get(label, {})
-        
             if isinstance(file, int):
-                outputPath = os.path.join(postprocessedRoot, labelEntries[str(file)])
+                [outputPath] = InputData_Classes.DataExporters.GetH5Path(dataset, label, file)
                 [data] = InputData_Classes.DataExporters.ReadH5File(outputPath, varNames)
                 return [data, outputPath]
-        
+
             if isinstance(file, (list, tuple)):
                 result = {}
                 paths = {}
                 for f in file:
-                    outputPath = os.path.join(postprocessedRoot, labelEntries[str(f)])
+                    [outputPath] = InputData_Classes.DataExporters.GetH5Path(dataset, label, f)
                     [result[f]] = InputData_Classes.DataExporters.ReadH5File(outputPath, varNames)
                     paths[f] = outputPath
                 return [result, paths]
-        
+
             raise TypeError(f"file must be int or list/tuple of int, got {type(file).__name__}")
 
         @staticmethod
-        def LoadManifest(manifestPath):
-            """Helper: load manifest.json, or an empty dict if it doesn't exist yet."""
-            if not os.path.exists(manifestPath):
+        def GetH5FileName(dataset, label, file):
+            """Helper: file name for this label and file index (cm1_<number>_<label>.h5), where <number> is the
+            number in the source file name (timestep-by-timestep data) or the zero-padded file index."""
+            if dataset.isDataTimestepByTimestep:
+                number = os.path.splitext(os.path.basename(dataset.fileList[file]))[0].split("_")[-1]
+            else:
+                number = f"{file:06d}"
+            return [f"cm1_{number}_{label}.h5"]
+
+        @staticmethod
+        def GetH5Path(dataset, label, file):
+            """Helper: full path of the saved H5 file for this label and file index; a clear error if it does not
+            exist (not yet computed, or the job that should have written it failed)."""
+            [fileName] = InputData_Classes.DataExporters.GetH5FileName(dataset, label, file)
+            outputPath = os.path.join(dataset.dataDirectory, "Postprocessed", label, fileName)
+            if not os.path.exists(outputPath):
+                raise FileNotFoundError(f"No '{label}' file for file index {file}: {outputPath}")
+            return [outputPath]
+
+        @staticmethod
+        def GetTemporaryPath(path):
+            """Helper: a temporary file name next to path, unique across nodes and processes (host name, process id
+            and a random suffix), so two jobs can never write the same temporary file."""
+            return [f"{path}.{socket.gethostname()}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"]
+
+        @staticmethod
+        def ReadManifestFile(manifestPath):
+            """Helper: read manifest.json; an empty dict if it doesn't exist or can't be parsed."""
+            try:
+                with open(manifestPath, "r") as f:
+                    return [json.load(f)]
+            except (FileNotFoundError, json.JSONDecodeError):
                 return [{}]
+
+        @staticmethod
+        def LoadManifest(manifestPath):
+            """Helper: load manifest.json (a record of saved files), or an empty dict if it doesn't exist yet."""
             lockPath = manifestPath + ".lock"
             with open(lockPath, "w") as lockFile:
                 fcntl.flock(lockFile, fcntl.LOCK_SH)
                 try:
-                    with open(manifestPath, "r") as f:
-                        return [json.load(f)]
+                    return InputData_Classes.DataExporters.ReadManifestFile(manifestPath)
                 finally:
                     fcntl.flock(lockFile, fcntl.LOCK_UN)
         
         @staticmethod
         def SaveManifest(manifestPath, manifest):
-            """Helper: write manifest.json."""
-            with open(manifestPath, "w") as f:
-                json.dump(manifest, f, indent=2)
+            """Helper: write manifest.json atomically (to a unique temporary file, then renamed over the old one),
+            so a reader never sees a half-written or empty file."""
+            [tmpPath] = InputData_Classes.DataExporters.GetTemporaryPath(manifestPath)
+            try:
+                with open(tmpPath, "w") as f:
+                    json.dump(manifest, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmpPath, manifestPath)
+            finally:
+                if os.path.exists(tmpPath):
+                    os.remove(tmpPath)
+
+        @staticmethod
+        def AddManifestEntry(dataset, label, file, relativePath):
+            """Helper: add one entry to manifest.json under the lock. Where locks are not shared across nodes, an
+            entry can still be lost when two jobs update at once; that only affects this record, since loading uses
+            the naming convention, and RebuildManifest restores it."""
+            manifestPath = os.path.join(dataset.dataDirectory, "Postprocessed", "manifest.json")
+            lockPath = manifestPath + ".lock"
+            with open(lockPath, "w") as lockFile:
+                fcntl.flock(lockFile, fcntl.LOCK_EX)
+                try:
+                    [manifest] = InputData_Classes.DataExporters.ReadManifestFile(manifestPath)
+                    manifest.setdefault(label, {})[str(file)] = relativePath
+                    InputData_Classes.DataExporters.SaveManifest(manifestPath, manifest)
+                finally:
+                    fcntl.flock(lockFile, fcntl.LOCK_UN)
+
+        @staticmethod
+        def RebuildManifest(dataset, removeTemporary=False, checkReadable=False):
+            """
+            Rebuild <dataDirectory>/Postprocessed/manifest.json from the H5 files on disk (every label folder), e.g.
+            after a job array run with updateManifest=False. Prints, per label, the number of files found and the
+            file indices that are missing, and lists leftover temporary files from interrupted writes
+            (removeTemporary=True deletes them).
+            checkReadable: also open every file and count it as missing if it can't be read (e.g. a file written
+            directly to its final name by an older version of SaveH5 and cut short by a crash or time limit).
+            """
+            postprocessedRoot = os.path.join(dataset.dataDirectory, "Postprocessed")
+            nFiles = len(dataset.fileList) if dataset.isDataTimestepByTimestep else dataset.Ntime
+            manifest, missing = {}, {}
+            for label in sorted(os.listdir(postprocessedRoot)):
+                labelDir = os.path.join(postprocessedRoot, label)
+                if not os.path.isdir(labelDir):
+                    continue
+                present = set(os.listdir(labelDir))
+                for file in range(nFiles):
+                    [fileName] = InputData_Classes.DataExporters.GetH5FileName(dataset, label, file)
+                    readable = fileName in present
+                    if readable and checkReadable:
+                        try:
+                            with h5py.File(os.path.join(labelDir, fileName), "r") as f:
+                                list(f.keys())
+                        except OSError:
+                            readable = False
+                            print(f"{label}: unreadable file {fileName}")
+                    if readable:
+                        manifest.setdefault(label, {})[str(file)] = os.path.join(label, fileName)
+                    else:
+                        missing.setdefault(label, []).append(file)
+                #Leftover temporary files from writes that were interrupted
+                leftovers = [name for name in present if name.endswith(".tmp")]
+                if leftovers:
+                    print(f"{label}: {len(leftovers)} leftover temporary files"
+                          + (" (removed)" if removeTemporary else ""))
+                    if removeTemporary:
+                        for name in leftovers:
+                            os.remove(os.path.join(labelDir, name))
+            manifestPath = os.path.join(postprocessedRoot, "manifest.json")
+            lockPath = manifestPath + ".lock"
+            with open(lockPath, "w") as lockFile:
+                fcntl.flock(lockFile, fcntl.LOCK_EX)
+                try:
+                    InputData_Classes.DataExporters.SaveManifest(manifestPath, manifest)
+                finally:
+                    fcntl.flock(lockFile, fcntl.LOCK_UN)
+            for label in sorted(set(manifest) | set(missing)):
+                nMissing = len(missing.get(label, []))
+                print(f"{label}: {len(manifest.get(label, {}))} of {nFiles} files"
+                      + (f"; missing file indices {missing[label]}" if nMissing else ""))
+            return [manifest, missing]
 
     class UtilityFunctions:
     
