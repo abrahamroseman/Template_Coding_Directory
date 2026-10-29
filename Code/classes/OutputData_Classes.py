@@ -24,6 +24,8 @@ import os
 import numpy as np
 import h5py; import pickle
 import json
+import fcntl, socket, uuid
+import xarray as xr
 
 #Class
 class OutputData_Classes:
@@ -115,7 +117,7 @@ class OutputData_Classes:
                              fileName, subFileName, fileType=fileType)
                 
         def LoadOutput(self, folderName, scriptName, dataName,
-                       subFileName=None, verbose=True):
+                       subFileName=None, fileName=None, verbose=True):
             log = self.load_log()
         
             if folderName not in log:
@@ -131,14 +133,12 @@ class OutputData_Classes:
             entry = log[folderName][scriptName][dataName]
             subFolderName = entry.get("subFolderName")
             subDataName = entry.get("subDataName")
-            baseFileName = entry["fileName"]
+            baseFileName = fileName if fileName is not None else entry["fileName"]   # the log only keeps the last-saved fileName per dataName
             fileType = entry["fileType"]
         
             if subFileName is not None:
-                availableSubNames = entry.get("subFileNames", [])
-                if subFileName not in availableSubNames:
-                    raise KeyError(f"No subFileName '{subFileName}' logged under "
-                                    f"'{folderName}/{scriptName}/{dataName}'. Available: {availableSubNames}")
+                # Not checked against the log's subFileNames: parallel jobs can lose log entries, and the path
+                # below is fully determined by the names, so a truly missing file raises FileNotFoundError.
                 fileName = f"{baseFileName}_{subFileName}"
             else:
                 fileName = baseFileName
@@ -185,7 +185,7 @@ class OutputData_Classes:
             def loadFunction(filepath, verbose=True):
                 return self.LoadOutput(
                     folderName=folderName, scriptName=scriptName, dataName=dataName,
-                    subFileName=subFileName, verbose=verbose)
+                    subFileName=subFileName, fileName=fileName, verbose=verbose)
         
             def saveFunction(data, filepath, dtype=None):
                 self.SaveOutput(
@@ -226,10 +226,38 @@ class OutputData_Classes:
                 with open(self.outputLogFile, 'r') as f:
                     return json.load(f)
             return {}
-                
+
         def update_log(self, folderName, scriptName, dataName, subFolderName, subDataName,
                        fileName, subFileName=None, fileType="h5"):
-            log = self.load_log()
+            """Add one entry to the log. Locked (one writer at a time where flock works) and atomic (readers
+            never see a half-written file). If the log can't be read, the update is skipped rather than
+            overwriting it -- the log is only a record; LoadOutput doesn't need sub-file entries."""
+            os.makedirs(os.path.dirname(self.outputLogFile), exist_ok=True)
+            with open(self.outputLogFile + ".lock", "w") as lockFile:
+                fcntl.flock(lockFile, fcntl.LOCK_EX)
+                try:
+                    try:
+                        log = self.load_log()
+                    except json.JSONDecodeError:
+                        print(f"Warning: couldn't read {self.outputLogFile}; log not updated (run rebuild_log later).")
+                        return
+                    self.AddLogEntry(log, folderName, scriptName, dataName, subFolderName, subDataName,
+                                     fileName, subFileName, fileType)
+                    self.WriteLogAtomic(log)
+                finally:
+                    fcntl.flock(lockFile, fcntl.LOCK_UN)
+
+        def WriteLogAtomic(self, log):
+            """Helper: write the log to a unique temporary file, then rename it over the real one."""
+            [tempPath] = OutputData_Classes.Functions.GetTemporaryPath(self.outputLogFile)
+            with open(tempPath, 'w') as f:
+                json.dump(log, f, indent=2)
+                f.flush(); os.fsync(f.fileno())
+            os.replace(tempPath, self.outputLogFile)
+
+        def AddLogEntry(self, log, folderName, scriptName, dataName, subFolderName, subDataName,
+                        fileName, subFileName, fileType):
+            """Helper: add/refresh one entry in the log dictionary (in memory)."""
             log.setdefault(folderName, {})
             log[folderName].setdefault(scriptName, {})
         
@@ -250,10 +278,6 @@ class OutputData_Classes:
         
             if subFileName is not None and subFileName not in log[folderName][scriptName][dataName]["subFileNames"]:
                 log[folderName][scriptName][dataName]["subFileNames"].append(subFileName)
-        
-            os.makedirs(os.path.dirname(self.outputLogFile), exist_ok=True)
-            with open(self.outputLogFile, 'w') as f:
-                json.dump(log, f, indent=2)
                         
         def show_log(self):
             log = self.load_log()
@@ -330,8 +354,7 @@ class OutputData_Classes:
                         entry["subFileNames"].append(subFileName)
         
             os.makedirs(os.path.dirname(self.outputLogFile), exist_ok=True)
-            with open(self.outputLogFile, 'w') as f:
-                json.dump(rebuiltLog, f, indent=2)
+            self.WriteLogAtomic(rebuiltLog)
         
             if verbose:
                 print(f"Rebuilt log written to: {self.outputLogFile}\n")
@@ -411,16 +434,23 @@ class OutputData_Classes:
             else:
                 dtype_list = [dtype] * len(outputDictionary)
         
-            with h5py.File(filePath, 'w') as f:
+            [tempPath] = OutputData_Classes.Functions.GetTemporaryPath(filePath)
+            with h5py.File(tempPath, 'w') as f:
                 for (varName, arr), dt in zip(outputDictionary.items(), dtype_list):
                     f.create_dataset(varName, data=arr, dtype=dt, compression="gzip")
         
                 if attrs:
                     for key, value in attrs.items():
                         f.attrs[key] = value if value is not None else ""
+            os.replace(tempPath, filePath)      # the finished file appears all at once
         
             if verbose:
                 print(f"Saved output file: {filePath}\n")
+
+        @staticmethod
+        def GetTemporaryPath(path):
+            """Helper: a temporary file name next to path, unique across nodes and processes."""
+            return [f"{path}.{socket.gethostname()}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"]
             
         @staticmethod
         def LoadOutput_H5(filePath, dtype=None, verbose=True,
@@ -483,8 +513,10 @@ class OutputData_Classes:
             if attrs:
                 dataToSave["_attrs"] = attrs
         
-            with open(filePath, 'wb') as file:
+            [tempPath] = OutputData_Classes.Functions.GetTemporaryPath(filePath)
+            with open(tempPath, 'wb') as file:
                 pickle.dump(dataToSave, file)
+            os.replace(tempPath, filePath)      # the finished file appears all at once
         
             if verbose:
                 print(f"Saved output file: {filePath}\n")
