@@ -176,25 +176,20 @@ class InputData_Classes:
                 dataset.time = time
                 dataset.Ntime = len(time)
 
-            [timeStrings] = self.GetTimeStrings(dataset.time)
-            dataset.timeStrings = timeStrings
+            [dataset.timeStrings] = self.GetTimeStrings(dataset.time)
 
-            [gridSpacing] = self.GetGridSpacing(dataset, timeCoord)
-            dataset.gridSpacing = gridSpacing
+            [dataset.gridSpacing] = self.GetGridSpacing(dataset, timeCoord)
 
-            [gridsPerKm, gridsPerMin] = self.GetGridsPerUnit(gridSpacing)
-            dataset.gridsPerKm = gridsPerKm
-            dataset.gridsPerMin = gridsPerMin
+            [dataset.gridsPerKm, dataset.gridsPerMin] = self.GetGridsPerUnit(dataset.gridSpacing)
 
-            [initialTimeLT, timeHoursLT] = self.GetLocalTime(
-                fileList, config, userInitialTimeLT, dataset.Ntime, gridSpacing)
-            dataset.initialTimeLT = initialTimeLT
-            dataset.timeHoursLT = timeHoursLT
+            [dataset.initialTimeLT, dataset.timeHoursModel, dataset.timeHoursLT, dataset.timeUTC] = self.GetTimeArrays(
+                fileList, config, userInitialTimeLT, dataset.time)
 
-            [varList] = self.GetVariableNames(fileList)
-            dataset.varList = varList
+            [dataset.varList] = self.GetVariableNames(fileList)
 
             dataset.domainSubsetBounds = domainSubsetBounds
+            dataset.case = config.get("case")
+            [dataset.boundaryConditions, dataset.isPeriodic] = self.GetBoundaryConditions(fileList, config)
             
             dataset.OpenData = lambda file=None, **kwargs: (
                 InputData_Classes.DataOpeners.OpenData(fileList, concatDim=timeCoord, file=file, 
@@ -318,9 +313,7 @@ class InputData_Classes:
         
         def GetGridsPerUnit(self, gridSpacing):
             """
-            gridsPerKms: index of the first vertical level where dz >= 1000 m
-            (useful for slicing to km-scale resolution). gridsPerMins: number of
-            timesteps per minute, from dt.
+            gridsPerKm: grid cells per km in x (from dxh). gridsPerMin: output steps per minute (from dtime).
 
             Useful if for example wanting to determine how many gridboxes 
             are a radius of a (certain number of kms) * gridsPerKms.
@@ -343,8 +336,9 @@ class InputData_Classes:
 
         def GetSpatialSpacing(self, values):
             """Helper: spacing (m) for a spatial coordinate, scalar or diff array.
-            Assumes km input, per CM1 convention."""
-            diffs = np.diff(np.asarray(values)) * 1000
+            Assumes km input, per CM1 convention. Rounded to 0.1 m to remove float32 noise in
+            the stored coordinates (a few cm at ~300 km), so e.g. 400 m comes out as exactly 400.0."""
+            diffs = np.round(np.diff(np.asarray(values, dtype=np.float64)) * 1000, 1)
             return self.CollapseIfUniform(diffs)
 
         def CollapseIfUniform(self, diffs):
@@ -355,46 +349,91 @@ class InputData_Classes:
                 return diffs[0].item()
             return diffs
 
-        def GetLocalTime(self, fileList, config, userInitialTimeLT, Ntime, gridSpacing):
+        def GetBoundaryConditions(self, fileList, config):
             """
-            Determine initialTimeLT (decimal hours) and build timeHoursLT from
-            it, or return (None, None) if it can't be determined. Priority:
-              1. userInitialTimeLT, passed explicitly by the caller — for
-                 models/files that don't carry this info at all.
-              2. config["initialTimeLT"], a literal hardcoded by the resolver.
-              3. config["initialTimeAttrs"] = {"hour": attrName, "minute": attrName,
-                 "UTC_offset": hoursOffsetFromUTC (optional, default 0)},
-                 read from the first file's global attributes (e.g. CM1). The file's
-                 hour/minute is assumed to be UTC; UTC_offset converts it to local
-                 time (e.g. -5 for EST).
-            Needs gridSpacing.dtime to build timeHoursLT; if that's missing
-            (e.g. only one timestep), returns (initialTimeLT, None).
+            Lateral boundary conditions from the first file's global attributes, using the resolver's
+            boundaryConditionAttrs ({"west": attrName, ...}) and boundaryConditionCodes ({code: name}).
+            Returns [boundaryConditions, isPeriodic]:
+              boundaryConditions : {"west": "periodic", "east": "open-radiative", ...} (None if not available)
+              isPeriodic         : {"x": bool, "y": bool}, True only if both sides of that axis are periodic
             """
-            initialTimeAttrs = config.get("initialTimeAttrs")
+            attrNames = config.get("boundaryConditionAttrs")
+            codes = config.get("boundaryConditionCodes", {})
+            if not attrNames:
+                return [None, None]
+            with xr.open_dataset(fileList[0], decode_timedelta=True) as ds:
+                boundaryConditions = {side: codes.get(int(ds.attrs[name]), f"code {int(ds.attrs[name])}")
+                                      if name in ds.attrs else None
+                                      for side, name in attrNames.items()}
+            isPeriodic = {"x": boundaryConditions.get("west") == "periodic" and boundaryConditions.get("east") == "periodic",
+                          "y": boundaryConditions.get("south") == "periodic" and boundaryConditions.get("north") == "periodic"}
+            return [boundaryConditions, isPeriodic]
+
+        def GetTimeArrays(self, fileList, config, userInitialTimeLT, time):
+            """
+            Time arrays built from the actual time values, so they are right for a run that does not
+            start at t = 0 (e.g. a run restarted from another run's restart file):
+              timeHoursModel : hours since the model start time (same clock in every run)
+              timeHoursLT    : local time in hours, initialTimeLT + timeHoursModel. Not wrapped at 24,
+                               so noon on day 2 is 36.0
+              timeUTC        : datetime64 in UTC (None if the file has no year/month/day attributes)
+            initialTimeLT (decimal hours, the local time at the model start) is found in this order:
+              1. userInitialTimeLT, passed by the caller
+              2. config["initialTimeLT"], hardcoded by the resolver
+              3. config["initialTimeAttrs"]: the file's hour/minute attributes (UTC) + UTC_offset
+            """
+            initialTimeAttrs = config.get("initialTimeAttrs") or {}
+            with xr.open_dataset(fileList[0], decode_timedelta=True) as ds:
+                attrs = dict(ds.attrs)
+
+            #Seconds since the model start, from the file times
+            [startUTC] = self.GetStartUTC(attrs, initialTimeAttrs)
+            [seconds] = self.TimeToSeconds(time, startUTC)
+            timeHoursModel = seconds / 3600
+
+            #Local time at the model start
             if userInitialTimeLT is not None:
                 initialTimeLT = userInitialTimeLT
             elif "initialTimeLT" in config:
                 initialTimeLT = config["initialTimeLT"]
             elif initialTimeAttrs:
-                with xr.open_dataset(fileList[0], decode_timedelta=True) as ds:
-                    hour = ds.attrs.get(initialTimeAttrs.get("hour"), 0)
-                    minute = ds.attrs.get(initialTimeAttrs.get("minute"), 0)
-                utcOffset = initialTimeAttrs.get("UTC_offset", 0)
-                initialTimeLT = (hour + minute / 60 + utcOffset) % 24
+                hour = attrs.get(initialTimeAttrs.get("hour"), 0)
+                minute = attrs.get(initialTimeAttrs.get("minute"), 0)
+                initialTimeLT = (hour + minute / 60 + initialTimeAttrs.get("UTC_offset", 0)) % 24
             else:
-                return [None, None]
-        
-            if not hasattr(gridSpacing, "dtime"):
-                return [initialTimeLT, None]
-        
-            timeHoursLT = np.arange(Ntime) * (gridSpacing.dtime / 3600) + initialTimeLT
-            return [initialTimeLT, timeHoursLT]
+                initialTimeLT = None
+
+            timeHoursLT = None if initialTimeLT is None else initialTimeLT + timeHoursModel
+            timeUTC = None if startUTC is None else startUTC + (seconds * 1e9).astype("timedelta64[ns]")
+            return [initialTimeLT, timeHoursModel, timeHoursLT, timeUTC]
+
+        def GetStartUTC(self, attrs, initialTimeAttrs):
+            """Helper: model start time (UTC) from the file's year/month/day/hour/minute attributes,
+            or None if the date attributes are missing. Attribute names default to the key names."""
+            names = {k: initialTimeAttrs.get(k, k) for k in ("year", "month", "day", "hour", "minute")}
+            if not all(names[k] in attrs for k in ("year", "month", "day")):
+                return [None]
+            v = {k: int(attrs.get(names[k], 0)) for k in names}
+            return [np.datetime64(f"{v['year']:04d}-{v['month']:02d}-{v['day']:02d}T{v['hour']:02d}:{v['minute']:02d}", "ns")]
+
+        def TimeToSeconds(self, time, startUTC):
+            """Helper: the time coordinate as float seconds since the model start, whether xarray
+            decoded it as timedelta64, as datetime64, or left it as plain seconds."""
+            t = np.asarray(time)
+            if np.issubdtype(t.dtype, np.timedelta64):
+                return [t / np.timedelta64(1, "s")]
+            if np.issubdtype(t.dtype, np.datetime64):
+                if startUTC is None:
+                    raise ValueError("Time is datetime64 but the file has no start date attributes.")
+                return [(t - startUTC) / np.timedelta64(1, "s")]
+            return [t.astype(float)]
 
         def GetVariableNames(self, fileList):
             """Get list of data-variable names from the first file."""
             with xr.open_dataset(fileList[0], decode_timedelta=True) as ds:
                 varList = list(ds.data_vars)
             return [varList]
+
 
         # ============================================================
         # === Information ========================================
@@ -421,6 +460,9 @@ class InputData_Classes:
             print(f"  timestep-by-timestep: {dataset.isDataTimestepByTimestep}")
             print(f"  Time steps:    {len(np.atleast_1d(dataset.time))}")
             print(f"  Initial LT:    {dataset.initialTimeLT}")
+            print(f"  Model hours:   {dataset.timeHoursModel[0]:.3f} to {dataset.timeHoursModel[-1]:.3f}")
+            if dataset.timeUTC is not None:
+                print(f"  UTC:           {dataset.timeUTC[0]} to {dataset.timeUTC[-1]}")
             print(f"  Variables:     {dataset.varList}")
 
     class PathResolvers:
@@ -430,32 +472,43 @@ class InputData_Classes:
         "excludePatterns", "initialTimeLT", "initialTimeAttrs".
         """
 
+        #Add Per-simulation Settings Here
+        SIMULATIONS = {
+            "Test": {"folder": "Simulation_Test", "case": "TRACER", "UTC_offset": -5, "domainSubsetBounds": {}}, #testing
+            "1":    {"folder": "Simulation_1",    "case": "TRACER", "UTC_offset": -5, "domainSubsetBounds": {}}, #unsuccessful
+            "2":    {"folder": "Simulation_2",    "case": "DYNAMO", "UTC_offset": +5, "domainSubsetBounds": {}}, #control
+            "3":    {"folder": "Simulation_3",    "case": "DYNAMO", "UTC_offset": +5, "domainSubsetBounds": {}}, #forced
+        }
+
         @staticmethod
         def CloudModelOne(inputDirectory, simulationLabel, **overrides):
-            simulationFolders = {"Test": "Simulation_Test","1": "Simulation_1", "2": "Simulation_2"}
-            folderName = simulationFolders[str(simulationLabel)]
-            dataDirectory = os.path.join(inputDirectory, "Model", folderName)
-        
+            sim = InputData_Classes.PathResolvers.SIMULATIONS[str(simulationLabel)]
+            dataDirectory = os.path.join(inputDirectory, "Model", sim["folder"])
+            timeAttrs = {"hour": "hour", "minute": "minute", "UTC_offset": sim["UTC_offset"]}
+            CM1_BOUNDARY_CONDITIONS = {1: "periodic", 2: "open-radiative", 3: "rigidwall-free-slip", 4: "rigidwall-no-slip"}
+
             dataTypeConfig = {
                 "eulerianData": {
                     "dataDirectory": dataDirectory,
                     "filePattern": "cm1out_*.nc",
                     "excludePatterns": ("cm1out_pdata*.nc", "cm1out_stats*.nc"),
                     "coordNames": ("time", "zf", "zh", "yf", "yh", "xf", "xh"),
-                    "initialTimeAttrs": {"hour": "hour", "minute": "minute", "UTC_offset": -5},
-                    "domainSubsetBounds": {"xh": slice(20, 280),}, #... etc #in same units of the coords
-        
+                    "boundaryConditionAttrs": {"west": "wbc", "east": "ebc", "south": "sbc", "north": "nbc"},
+                    "boundaryConditionCodes": CM1_BOUNDARY_CONDITIONS,
+                    "initialTimeAttrs": timeAttrs,
+                    "domainSubsetBounds": sim["domainSubsetBounds"], #e.g. {"xh": slice(20, 280)}
+                    "case": sim["case"],
                 },
                 "lagrangianData": {
                     "dataDirectory": dataDirectory,
                     "filePattern": "cm1out_pdata.nc",
                     "coordNames": ("time",),
-                    "initialTimeAttrs": {"hour": "hour", "minute": "minute", "UTC_offset": -5},
+                    "initialTimeAttrs": timeAttrs,
+                    "case": sim["case"],
                 },
             }
-        
-            dataTypeConfig["eulerianData"].update(overrides)   # <-- this line is the actual fix
-        
+
+            dataTypeConfig["eulerianData"].update(overrides)
             return [dataTypeConfig]
 
         # Add more resolvers here as needed, e.g.:
@@ -468,7 +521,7 @@ class InputData_Classes:
             """Maps resolver name (string) -> resolver function."""
             registry = {
                 "CloudModelOne": self.CloudModelOne,
-                # "WRF": self.WRF,
+                # "MPAS": self.MPAS,
             }
             return [registry]
 
@@ -805,8 +858,17 @@ class InputData_Classes:
     class UtilityFunctions:
     
         @staticmethod
-        def CalculateTimeIndex(timeHoursLT, time_hr):
-            return int(np.abs(timeHoursLT - time_hr).argmin())
+        def CalculateTimeIndex(times, time_hr, tolerance_hr=None):
+            """Index of the time nearest time_hr (same units as times, e.g. timeHoursLT or timeHoursModel).
+            Raises an error if the nearest time is more than one output step away (default), i.e. the
+            requested time is outside the run, instead of silently returning the first or last index."""
+            times = np.asarray(times)
+            i = int(np.abs(times - time_hr).argmin())
+            if tolerance_hr is None:
+                tolerance_hr = np.median(np.diff(times)) if len(times) > 1 else 0.0
+            if abs(times[i] - time_hr) > tolerance_hr:
+                raise ValueError(f"Requested time {time_hr} is outside the data ({times[0]:.3f} to {times[-1]:.3f}).")
+            return i
 
         @staticmethod
         def ConvertLagrangianSpatialVariablesToIndex(z,y,x,eulerianData,invalid=-100):
