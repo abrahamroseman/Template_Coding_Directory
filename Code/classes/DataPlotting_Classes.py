@@ -13,7 +13,7 @@
 # from DataPlotting_Classes import DataPlotting_Classes
 
 
-# In[134]:
+# In[3]:
 
 
 # DataPlotting_Classes
@@ -112,21 +112,65 @@ class DataPlotting_Classes:
             if cbar.ax.xaxis.label.get_text():
                 cbar.ax.xaxis.label.set_fontsize(fontStyles["cbarLabel"]["fontsize"])
                 cbar.ax.xaxis.label.set_fontfamily(fontStyles["cbarLabel"]["fontfamily"])
-        
-        # @staticmethod
-        # def GenerateTicksAndLim(data, nTicks=6, nLevels=15):
-        #     if isinstance(data, (list, tuple)) and len(data) > 0 and not np.isscalar(data[0]):
-        #         data = np.concatenate([np.asarray(d).ravel() for d in data])
-        #     else:
-        #         data = np.asarray(data)
-        
-        #     dMin, dMax = np.nanmin(data), np.nanmax(data)
-        #     locator = MaxNLocator(nbins=nTicks - 1)
-        #     ticks = locator.tick_values(dMin, dMax)
-        #     lim = (ticks[0], ticks[-1])
 
-        #     levels = np.linspace(lim[0], lim[1], nLevels)
-        #     return [ticks,lim,levels]
+        @staticmethod
+        def AddSuptitle(fig, text, fontStyles, pad=0.01):
+            """
+            Suptitle placed just above the highest drawn element (axes, panel titles, tick labels,
+            legends, colorbars), pad (figure fraction) above it, so the gap is the same for any layout.
+            fontStyles: from GetFontStyles (uses its 'suptitle' entry).
+            """
+            fig.canvas.draw()                                   #positions are only known after drawing
+            renderer = fig.canvas.get_renderer()
+            toFigure = fig.transFigure.inverted()
+            artists = [ax for ax in fig.axes if ax.get_visible()] + list(fig.legends)
+            top = max(a.get_tightbbox(renderer).transformed(toFigure).y1 for a in artists)
+            style = fontStyles['suptitle']
+            return fig.suptitle(text, x=0.5, y=top + pad, ha='center', va='bottom',
+                                fontsize=style['fontsize'], fontfamily=style['fontfamily'],
+                                fontweight=style['fontweight'])
+
+        @staticmethod
+        def AddFigureLegend(fig, handles, labels, fontStyles, side='bottom', ncol=None, pad=0.01, **legendKwargs):
+            """
+            Figure legend placed just outside the drawn content (axes, tick and axis labels, colorbars, a suptitle,
+            and any figure legends already added), pad (figure fraction) away from it.
+            side : 'bottom', 'top', 'left' or 'right'. Top/bottom legends are centered along the panels,
+                   left/right legends are centered vertically.
+            ncol : columns (default 3 for top/bottom, 1 for left/right). Entries fill column by column.
+            fontStyles : from GetFontStyles (uses its 'legend' entry). Extra keyword arguments go to fig.legend.
+            """
+            if side not in ('bottom', 'top', 'left', 'right'):
+                raise ValueError(f"side must be 'bottom', 'top', 'left' or 'right', got {side!r}")
+            fig.canvas.draw()                                   #positions are only known after drawing
+            renderer = fig.canvas.get_renderer()
+            toFigure = fig.transFigure.inverted()
+            boxes = [ax.get_tightbbox(renderer) for ax in fig.axes if ax.get_visible() and ax.axison]
+            boxes += [legend.get_window_extent(renderer) for legend in fig.legends]
+            suptitle = fig._suptitle
+            if suptitle is not None and side != 'top':          #top legend goes between panels and suptitle
+                boxes.append(suptitle.get_window_extent(renderer))
+            boxes = [b.transformed(toFigure) for b in boxes if b is not None]
+            x0, x1 = min(b.x0 for b in boxes), max(b.x1 for b in boxes)
+            y0, y1 = min(b.y0 for b in boxes), max(b.y1 for b in boxes)
+
+            #(legend corner attached to the anchor, anchor point) for each side
+            placement = {'bottom': ('upper center', ((x0 + x1) / 2, y0 - pad)),
+                         'top':    ('lower center', ((x0 + x1) / 2, y1 + pad)),
+                         'left':   ('center right', (x0 - pad, (y0 + y1) / 2)),
+                         'right':  ('center left',  (x1 + pad, (y0 + y1) / 2))}
+            loc, anchor = placement[side]
+            if ncol is None:
+                ncol = 3 if side in ('bottom', 'top') else 1
+            legend = fig.legend(handles, labels, loc=loc, bbox_to_anchor=anchor, bbox_transform=fig.transFigure,
+                                ncol=ncol, frameon=False, fontsize=fontStyles['legend']['fontsize'], **legendKwargs)
+            if suptitle is not None and side == 'top':          #move existing suptitle above the new legend
+                fig.canvas.draw()
+                legendTop = legend.get_window_extent(renderer).transformed(toFigure).y1
+                suptitle.set_y(legendTop + pad)
+                suptitle.set_va('bottom')
+            return legend
+
         @staticmethod
         def GenerateTicksAndLim(data, nTicks=6, nLevels=15):
             if isinstance(data, (list, tuple)) and len(data) > 0 and not np.isscalar(data[0]):
@@ -790,6 +834,25 @@ class DataPlotting_Classes:
                 centerZero=True,
                 nLevelsNeg=4+1,
                 nLevelsPos=4+1)
+
+        @staticmethod
+        def Test4():
+            """Visual test of AddFigureLegend on every side, with and without a suptitle."""
+            UltimatePlotting = DataPlotting_Classes.UltimatePlotting_Class
+            from matplotlib.lines import Line2D
+            [fontStyles] = UltimatePlotting.GetFontStyles()
+            colors = ['#D55E00', '#E69F00', '#0072B2', '#56B4E9', '#009E73', '#999999']
+            x = np.linspace(0, 10, 50)
+            for side, suptitle in [('bottom', False), ('top', False), ('left', False), ('right', False), ('top', True), ('bottom', True)]:
+                [fig, axes, _] = UltimatePlotting.MakeAlignedGridFigure(nRows=2, nCols=2, figSize=(10, 6), colGapRatio=0.35)
+                for ax in axes.flat:
+                    for k, color in enumerate(colors):
+                        ax.plot(x, np.sin(x + k) * (k + 1), color=color)
+                    ax.twinx().set_ylabel('Twin')
+                if suptitle:
+                    UltimatePlotting.AddSuptitle(fig, f"Suptitle ({side} legend)", fontStyles)
+                handles = [Line2D([], [], color=color) for color in colors]
+                UltimatePlotting.AddFigureLegend(fig, handles, [f"Group {k}" for k in range(6)], fontStyles, side=side)
 
     # ============================================================
     # Functions
