@@ -692,29 +692,6 @@ class OutputData_Classes:
             if verbose:
                 self.Summary()
 
-    # Parallel_Class
-    # ============================================================
-    class Parallel_Class:
-        """
-        For running a function over many items (e.g. output times) on several cores of one node,
-        inside a single job or Jupyter session (as opposed to SlurmJobArray_Class, which splits work across jobs).
-        """
-        @staticmethod
-        def RunParallel(function, items, nWorkers=None, desc=''):
-            """
-            function(item) for every item, spread over nWorkers processes on this node. Default: the CPUs SLURM gave
-            this job (SLURM_CPUS_PER_TASK, or the cores this process may use). With one worker it runs a plain loop.
-            Results come back in the order of items. Uses 'fork', so the workers see the calling notebook's objects
-            (e.g. InputData, DatabaseManager). function must be defined at the top level (no lambdas); use
-            functools.partial for extra arguments.
-            """
-            nWorkers = nWorkers or int(os.environ.get('SLURM_CPUS_PER_TASK', len(os.sched_getaffinity(0))))
-            items = list(items)
-            if nWorkers <= 1:                                                  #one core: no pool needed
-                return [function(item) for item in tqdm(items, desc=f'{desc} (1 worker)')]
-            with ProcessPoolExecutor(max_workers=nWorkers, mp_context=mp.get_context('fork')) as pool:
-                return list(tqdm(pool.map(function, items), total=len(items), desc=f'{desc} ({nWorkers} workers)'))
-
         # ============================================================
         # ========== Summary Function ==========
         # ============================================================    
@@ -760,4 +737,27 @@ class OutputData_Classes:
             print("Unique starts:", len(np.unique(start)) == len(start))
             print("Unique ends:", len(np.unique(end)) == len(end))
             print("No zero-length ranges:", np.all(np.array(start) != np.array(end)))
+
+    # Parallel_Class
+    # ============================================================
+    class Parallel_Class:
+        """
+        For running a function over many items (e.g. output times) on several cores of one node,
+        inside a single job or Jupyter session (as opposed to SlurmJobArray_Class, which splits work across jobs).
+        """
+        @staticmethod
+        def RunParallel(function, items, nWorkers=None, desc=''):
+            """
+            function(item) for every item, spread over nWorkers processes on this node. Default: the CPUs SLURM gave
+            this job (SLURM_CPUS_PER_TASK, or the cores this process may use). With one worker it runs a plain loop.
+            Results come back in the order of items. Uses 'fork', so the workers see the calling notebook's objects
+            (e.g. InputData, DatabaseManager). function must be defined at the top level (no lambdas); use
+            functools.partial for extra arguments.
+            """
+            nWorkers = nWorkers or int(os.environ.get('SLURM_CPUS_PER_TASK', len(os.sched_getaffinity(0))))
+            items = list(items)
+            if nWorkers <= 1:                                                  #one core: no pool needed
+                return [function(item) for item in tqdm(items, desc=f'{desc} (1 worker)')]
+            with ProcessPoolExecutor(max_workers=nWorkers, mp_context=mp.get_context('fork')) as pool:
+                return list(tqdm(pool.map(function, items), total=len(items), desc=f'{desc} ({nWorkers} workers)'))
 
