@@ -189,6 +189,8 @@ class InputData_Classes:
 
             dataset.domainSubsetBounds = domainSubsetBounds
             dataset.case = config.get("case")
+            dataset.postprocessedRoot = os.path.join(os.path.expanduser(config.get("postprocessedDirectory") or dataDirectory),
+                                                     "Postprocessed")
             [dataset.boundaryConditions, dataset.isPeriodic] = self.GetBoundaryConditions(fileList, config)
             
             dataset.OpenData = lambda file=None, **kwargs: (
@@ -455,6 +457,7 @@ class InputData_Classes:
             """Helper: print one dataset's block within the overall Summary."""
             print(f" --- {dataTypeName} ---")
             print(f"  dataDirectory: {dataset.dataDirectory}")
+            print(f"  postprocessed: {dataset.postprocessedRoot}")
             print(f"  filePattern:   {dataset.filePattern}")
             print(f"  # files:       {len(dataset.fileList)}")
             print(f"  timestep-by-timestep: {dataset.isDataTimestepByTimestep}")
@@ -469,14 +472,16 @@ class InputData_Classes:
         """Namespace of named path-resolver functions, selectable by string key.
         Each resolver returns a dict: dataTypeName -> config dict, with keys
         "dataDirectory", "filePattern", "coordNames", and optionally
-        "excludePatterns", "initialTimeLT", "initialTimeAttrs".
+        "excludePatterns", "initialTimeLT", "initialTimeAttrs",
+        "postprocessedDirectory" (folder that holds Postprocessed/; default dataDirectory).
         """
 
         #Add Per-simulation Settings Here
         SIMULATIONS = {
             "Test": {"folder": "Simulation_Test", "case": "TRACER", "UTC_offset": -5, "domainSubsetBounds": {}}, #testing
             "1":    {"folder": "Simulation_1",    "case": "TRACER", "UTC_offset": -5, "domainSubsetBounds": {}}, #unsuccessful
-            "2":    {"folder": "Simulation_2",    "case": "DYNAMO", "UTC_offset": +5, "domainSubsetBounds": {}}, #control
+            "2":    {"folder": "Simulation_2",    "case": "DYNAMO", "UTC_offset": +5, "domainSubsetBounds": {},
+                     "postprocessedDirectory": "/home/air673/koa_scratch/3.Moist-Preconditioning-Project/Simulation_2/"}, #control
             "3":    {"folder": "Simulation_3",    "case": "DYNAMO", "UTC_offset": +5, "domainSubsetBounds": {}}, #forced
         }
 
@@ -498,6 +503,7 @@ class InputData_Classes:
                     "initialTimeAttrs": timeAttrs,
                     "domainSubsetBounds": sim["domainSubsetBounds"], #e.g. {"xh": slice(20, 280)}
                     "case": sim["case"],
+                    "postprocessedDirectory": sim.get("postprocessedDirectory"),
                 },
                 "lagrangianData": {
                     "dataDirectory": dataDirectory,
@@ -505,6 +511,7 @@ class InputData_Classes:
                     "coordNames": ("time",),
                     "initialTimeAttrs": timeAttrs,
                     "case": sim["case"],
+                    "postprocessedDirectory": sim.get("postprocessedDirectory"),
                 },
             }
 
@@ -628,20 +635,22 @@ class InputData_Classes:
     class DataExporters:
         """Namespace of stateless functions for exporting an already-prepared
         xarray Dataset to disk as HDF5. Each file's path is fixed by its label and file index
-        (<dataDirectory>/Postprocessed/<label>/cm1_<number>_<label>.h5), so files are found from that
-        naming convention alone. A shared JSON manifest (Postprocessed/manifest.json) is also kept as a
+        (<postprocessedRoot>/<label>/cm1_<number>_<label>.h5), so files are found from that
+        naming convention alone. postprocessedRoot is <dataDirectory>/Postprocessed, or
+        <postprocessedDirectory>/Postprocessed when the resolver sets postprocessedDirectory (e.g. on scratch).
+        A shared JSON manifest (<postprocessedRoot>/manifest.json) is also kept as a
         record of what has been saved, but nothing depends on it being complete."""
     
         @staticmethod
         def SaveH5(dataset, data, file, label, compression=None, verbose=False, updateManifest=True, **kwargs):
             """
-            Save data (an already-prepared xr.Dataset) as HDF5 into <dataset.dataDirectory>/Postprocessed/<label>/.
+            Save data (an already-prepared xr.Dataset) as HDF5 into <dataset.postprocessedRoot>/<label>/.
             The file is written under a temporary name and renamed when complete, so a file with the final name
             always holds complete data (a job killed mid-write leaves only a temporary file).
             updateManifest: also record the file in the shared manifest.json. Pass False from parallel job arrays
             and run RebuildManifest once afterwards, so jobs never write the shared file at the same time.
             """
-            postprocessedRoot = os.path.join(dataset.dataDirectory, "Postprocessed")
+            postprocessedRoot = dataset.postprocessedRoot
             postprocessedDir = os.path.join(postprocessedRoot, label)
             os.makedirs(postprocessedDir, exist_ok=True)
             [outputFile] = InputData_Classes.DataExporters.GetH5FileName(dataset, label, file)
@@ -739,7 +748,7 @@ class InputData_Classes:
             """Helper: full path of the saved H5 file for this label and file index; a clear error if it does not
             exist (not yet computed, or the job that should have written it failed)."""
             [fileName] = InputData_Classes.DataExporters.GetH5FileName(dataset, label, file)
-            outputPath = os.path.join(dataset.dataDirectory, "Postprocessed", label, fileName)
+            outputPath = os.path.join(dataset.postprocessedRoot, label, fileName)
             if not os.path.exists(outputPath):
                 raise FileNotFoundError(f"No '{label}' file for file index {file}: {outputPath}")
             return [outputPath]
@@ -790,7 +799,7 @@ class InputData_Classes:
             """Helper: add one entry to manifest.json under the lock. Where locks are not shared across nodes, an
             entry can still be lost when two jobs update at once; that only affects this record, since loading uses
             the naming convention, and RebuildManifest restores it."""
-            manifestPath = os.path.join(dataset.dataDirectory, "Postprocessed", "manifest.json")
+            manifestPath = os.path.join(dataset.postprocessedRoot, "manifest.json")
             lockPath = manifestPath + ".lock"
             with open(lockPath, "w") as lockFile:
                 fcntl.flock(lockFile, fcntl.LOCK_EX)
@@ -804,14 +813,15 @@ class InputData_Classes:
         @staticmethod
         def RebuildManifest(dataset, removeTemporary=False, checkReadable=False):
             """
-            Rebuild <dataDirectory>/Postprocessed/manifest.json from the H5 files on disk (every label folder), e.g.
-            after a job array run with updateManifest=False. Prints, per label, the number of files found and the
+            Rebuild <postprocessedRoot>/manifest.json after a job array run with updateManifest=False. 
+            Prints, per label, the number of files found and the
             file indices that are missing, and lists leftover temporary files from interrupted writes
             (removeTemporary=True deletes them).
-            checkReadable: also open every file and count it as missing if it can't be read (e.g. a file written
-            directly to its final name by an older version of SaveH5 and cut short by a crash or time limit).
+            checkReadable: also open every file and count it as missing if it can't be read (e.g. a file 
+            written directly to its final name by an older version of SaveH5 and cut short by a crash or time 
+            limit).
             """
-            postprocessedRoot = os.path.join(dataset.dataDirectory, "Postprocessed")
+            postprocessedRoot = dataset.postprocessedRoot
             nFiles = len(dataset.fileList) if dataset.isDataTimestepByTimestep else dataset.Ntime
             manifest, missing = {}, {}
             for label in sorted(os.listdir(postprocessedRoot)):
