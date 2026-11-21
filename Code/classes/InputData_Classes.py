@@ -477,6 +477,8 @@ class InputData_Classes:
         """
 
         #Add Per-simulation Settings Here
+        #postprocessedDirectory (optional): folder that holds this simulation's Postprocessed/ (e.g. on scratch).
+        #  Leave it out to use <dataDirectory>/Postprocessed. To change it, move the Postprocessed folder too.
         SIMULATIONS = {
             "Test": {"folder": "Simulation_Test", "case": "TRACER", "UTC_offset": -5, "domainSubsetBounds": {}}, #testing
             "1":    {"folder": "Simulation_1",    "case": "TRACER", "UTC_offset": -5, "domainSubsetBounds": {}}, #unsuccessful
