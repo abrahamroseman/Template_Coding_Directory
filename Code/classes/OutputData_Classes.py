@@ -746,18 +746,46 @@ class OutputData_Classes:
         inside a single job or Jupyter session (as opposed to SlurmJobArray_Class, which splits work across jobs).
         """
         @staticmethod
+        def PrepareWorker():
+            """
+            Runs once at the start of each worker process:
+              1. Undo any pinning to a single CPU. Workers can inherit or acquire one (e.g. from OpenMP/PyTorch), which
+                 makes all workers share one core. Asking for every CPU is safe: the kernel limits it to the CPUs
+                 SLURM gave this job.
+              2. One math-library thread per worker, so nWorkers processes use nWorkers cores instead of
+                 nWorkers x (threads each).
+            """
+            try:
+                os.sched_setaffinity(0, range(os.cpu_count()))
+            except OSError:
+                pass
+            for var in ['OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS']:
+                os.environ[var] = '1'
+            try:
+                from threadpoolctl import threadpool_limits
+                threadpool_limits(1)
+            except ImportError:
+                pass
+            try:
+                import torch
+                torch.set_num_threads(1)
+            except ImportError:
+                pass
+
+        @staticmethod
         def RunParallel(function, items, nWorkers=None, desc=''):
             """
             function(item) for every item, spread over nWorkers processes on this node. Default: the CPUs SLURM gave
             this job (SLURM_CPUS_PER_TASK, or the cores this process may use). With one worker it runs a plain loop.
             Results come back in the order of items. Uses 'fork', so the workers see the calling notebook's objects
             (e.g. InputData, DatabaseManager). function must be defined at the top level (no lambdas); use
-            functools.partial for extra arguments.
+            functools.partial for extra arguments. Each worker starts with PrepareWorker (all CPUs, one math thread).
             """
             nWorkers = nWorkers or int(os.environ.get('SLURM_CPUS_PER_TASK', len(os.sched_getaffinity(0))))
             items = list(items)
             if nWorkers <= 1:                                                  #one core: no pool needed
                 return [function(item) for item in tqdm(items, desc=f'{desc} (1 worker)')]
-            with ProcessPoolExecutor(max_workers=nWorkers, mp_context=mp.get_context('fork')) as pool:
+            with ProcessPoolExecutor(max_workers=nWorkers, mp_context=mp.get_context('fork'),
+                                     initializer=OutputData_Classes.Parallel_Class.PrepareWorker) as pool:
                 return list(tqdm(pool.map(function, items), total=len(items), desc=f'{desc} ({nWorkers} workers)'))
 
